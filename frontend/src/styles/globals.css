@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ─────────────────────────────────────── */
+:root {
+  --bg-primary:   #0a0a0f;
+  --bg-glass:     rgba(255, 255, 255, 0.04);
+  --border-glass: rgba(255, 255, 255, 0.08);
+  --accent:       #00f5ff;
+  --accent-dim:   rgba(0, 245, 255, 0.12);
+  --gradient-a:   #7c3aed;
+  --gradient-b:   #4f46e5;
+  --text-primary: #f1f5f9;
+  --text-muted:   #64748b;
+  --text-mono:    #94a3b8;
+}
+
+/* ─── Base Reset ─────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Scrollbar Styling ──────────────────────────────────── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: rgba(0, 245, 255, 0.2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 245, 255, 0.4); }
+
+/* ─── Glassmorphism Utility ──────────────────────────────── */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* ─── Accent Glow ────────────────────────────────────────── */
+.glow-accent {
+  box-shadow: 0 0 20px rgba(0, 245, 255, 0.15),
+              0 0 60px rgba(0, 245, 255, 0.05);
+}
+
+.text-accent       { color: var(--accent); }
+.text-muted-custom { color: var(--text-muted); }
+.text-mono         { font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', monospace; }
+
+/* ─── Gradient Text ──────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--gradient-a), var(--gradient-b));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-accent-text {
+  background: linear-gradient(135deg, var(--accent), var(--gradient-a));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Ambient Background Grid ────────────────────────────── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 245, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 245, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ─── Scanlines Effect (subtle) ─────────────────────────── */
+.scanlines::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ─── Page Layout ────────────────────────────────────────── */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
