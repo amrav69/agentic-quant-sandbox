@@ -176,15 +176,15 @@ export default function Analyze() {
 
   return (
     <PageWrapper>
-      <div className="max-w-screen-lg mx-auto px-6 pt-12 pb-20">
+      <div style={{ maxWidth: 820, margin: '0 auto', padding: 'clamp(2rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 5rem' }}>
 
         {/* ── Page Header ── */}
         <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="mb-10">
-          <motion.p variants={fadeUp} className="text-xs uppercase tracking-[0.3em] mb-2" style={{ color: 'var(--accent)' }}>
+          <motion.p variants={fadeUp} className="label-xs mb-2" style={{ color: 'var(--accent)' }}>
             AI Pipeline
           </motion.p>
-          <motion.h1 variants={fadeUp} className="text-3xl font-bold mb-2">Strategy Analyzer</motion.h1>
-          <motion.p variants={fadeUp} className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <motion.h1 variants={fadeUp} className="mb-2">Strategy Analyzer</motion.h1>
+          <motion.p variants={fadeUp} style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
             Enter any ticker to run the full Research → CodeGen → Critic pipeline.
           </motion.p>
         </motion.div>

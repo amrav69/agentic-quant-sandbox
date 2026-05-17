@@ -311,21 +311,20 @@ export default function History() {
 
   return (
     <PageWrapper>
-      <div className="max-w-screen-lg mx-auto px-6 pt-12 pb-20">
+      <div style={{ maxWidth: 820, margin: '0 auto', padding: 'clamp(2rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 5rem' }}>
 
         {/* ── Header ── */}
         <motion.div
           variants={staggerContainer} initial="hidden" animate="visible"
           className="mb-10"
         >
-          <motion.p variants={fadeUp} className="text-xs uppercase tracking-[0.3em] mb-2"
-            style={{ color: 'var(--accent)' }}>
+          <motion.p variants={fadeUp} className="label-xs mb-2" style={{ color: 'var(--accent)' }}>
             Pipeline History
           </motion.p>
           <motion.div variants={fadeUp} className="flex items-end justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold mb-1">Analysis Archive</h1>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              <h1 className="mb-1">Analysis Archive</h1>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
                 {analysisHistory.length} total runs · {passCount} passed · {failCount} failed
               </p>
             </div>
@@ -334,8 +333,8 @@ export default function History() {
                 whileHover={{ scale: 1.04, color: '#ef4444' }}
                 whileTap={{ scale: 0.96 }}
                 onClick={clearHistory}
-                className="flex items-center gap-2 text-xs font-mono glass px-3 py-2 rounded-lg shrink-0"
-                style={{ color: 'var(--text-muted)', border: '1px solid var(--border-glass)', transition: 'color 0.2s' }}
+                className="glass flex items-center gap-2 rounded-lg shrink-0"
+                style={{ padding: '0.45rem 0.85rem', color: 'var(--text-muted)', border: '1px solid var(--border-glass)', fontSize: '11px', fontFamily: 'monospace', transition: 'color 0.2s' }}
               >
                 <Trash2 size={12} /> Clear All
               </motion.button>

@@ -1,7 +1,7 @@
 /**
  * PageWrapper.jsx
- * Wraps every page with animated entry/exit transitions.
- * Use AnimatePresence in App.jsx to enable exit animations between routes.
+ * Animated page transition wrapper.
+ * Offsets below the fixed navbar via padding-top = --navbar-h (64px).
  */
 import { motion } from 'framer-motion'
 import { pageTransition } from '../animations/motionVariants'
@@ -13,8 +13,8 @@ export default function PageWrapper({ children }) {
       initial="hidden"
       animate="visible"
       exit="exit"
-      className="flex-1 pt-16 min-h-screen"
-      style={{ background: 'var(--bg-primary)' }}
+      className="flex-1 min-h-screen"
+      style={{ paddingTop: 'var(--navbar-h)', background: 'var(--bg-primary)' }}
     >
       {children}
     </motion.main>
