@@ -1,0 +1,36 @@
+# Environment files
+.env
+.env.*
+
+# Python virtual environment
+venv/
+ENV/
+env/
+.venv/
+active/
+
+# Python compiled / cache files
+__pycache__/
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Rust build target
+rust/target/
+target/
+
+# IDE / System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Project-specific temp / logs / locks
+*.lock
+response_*.json
+.antigravity/
+logs/
+*.log
