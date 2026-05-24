@@ -34,3 +34,7 @@ response_*.json
 .antigravity/
 logs/
 *.log
+
+# Textual TUI
+.textual/
+textual.log

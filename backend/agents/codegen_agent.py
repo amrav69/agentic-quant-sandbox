@@ -8,7 +8,7 @@ class CodeGenAgent:
 
 Your job: Take a trade hypothesis and write a complete vectorbt backtest in Python.
 
-Rules:
+Rules
 1. Always use vectorbt for backtesting
 2. Include entry and exit signals based on the hypothesis
 3. Set stop loss using ATR multiplier
