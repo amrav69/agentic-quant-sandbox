@@ -1,6 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from backend.llm_client import get_groq_client
-from backend.risk.engine import RiskChecker, TradeValidator, RiskConfig
+from backend.risk.engine import TradeValidator
 import json
 import re
 from typing import Dict, Any

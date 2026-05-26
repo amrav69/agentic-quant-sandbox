@@ -15,13 +15,10 @@ Architecture:
 
 from __future__ import annotations
 
-import asyncio
-import json
 from datetime import datetime
 from typing import Any
 
 import httpx
-from rich.syntax import Syntax
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -33,9 +30,7 @@ from textual.widgets import (
     Button,
     DataTable,
     Footer,
-    Header,
     Input,
-    Label,
     LoadingIndicator,
     RichLog,
     Static,
@@ -583,7 +578,7 @@ class DashboardView(Widget):
         self.set_interval(5, self._refresh_sys)
 
     def _refresh_sys(self) -> None:
-        import sys, platform
+        import sys
         self.query_one("#sys-time",   Static).update(
             f"[#2a6080]TIME   [/] {datetime.now().strftime('%H:%M:%S')}")
         self.query_one("#sys-python", Static).update(

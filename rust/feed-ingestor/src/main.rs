@@ -1,10 +1,10 @@
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::signal;
 use tracing_subscriber::EnvFilter;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Tick {
     symbol: String,
     price: f64,
@@ -152,4 +152,97 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_subscription_polygon() {
+        let msg = build_subscription_message("polygon", &["AAPL", "TSLA"]);
+        assert_eq!(msg["action"], "subscribe");
+        assert_eq!(msg["params"], "AAPL,TSLA");
+    }
+
+    #[test]
+    fn test_build_subscription_alpaca() {
+        let msg = build_subscription_message("alpaca", &["AAPL", "TSLA"]);
+        assert_eq!(msg["action"], "subscribe");
+        assert_eq!(msg["trades"], serde_json::json!(["AAPL", "TSLA"]));
+        assert_eq!(msg["quotes"], serde_json::json!(["AAPL", "TSLA"]));
+        assert_eq!(msg["bars"], serde_json::json!(["AAPL", "TSLA"]));
+    }
+
+    #[test]
+    fn test_build_subscription_unknown_provider_falls_back_to_polygon() {
+        let msg = build_subscription_message("other", &["BTC"]);
+        assert_eq!(msg["action"], "subscribe");
+        assert_eq!(msg["params"], "BTC");
+    }
+
+    #[test]
+    fn test_parse_tick_polygon() {
+        let json: serde_json::Value = serde_json::json!({
+            "ev": "AM", "sym": "AAPL", "p": 150.25, "s": 100, "t": 1234567890
+        });
+        let tick = parse_tick("polygon", &json).unwrap();
+        assert_eq!(tick.symbol, "AAPL");
+        assert!((tick.price - 150.25).abs() < f64::EPSILON);
+        assert!((tick.volume - 100.0).abs() < f64::EPSILON);
+        assert_eq!(tick.timestamp, 1234567890);
+    }
+
+    #[test]
+    fn test_parse_tick_alpaca() {
+        let json: serde_json::Value = serde_json::json!({
+            "T": [{"S": "AAPL", "p": 150.25, "s": 100, "t": 1234567890}]
+        });
+        let tick = parse_tick("alpaca", &json).unwrap();
+        assert_eq!(tick.symbol, "AAPL");
+        assert!((tick.price - 150.25).abs() < f64::EPSILON);
+        assert!((tick.volume - 100.0).abs() < f64::EPSILON);
+        assert_eq!(tick.timestamp, 1234567890);
+    }
+
+    #[test]
+    fn test_parse_tick_missing_fields_returns_none() {
+        let json: serde_json::Value = serde_json::json!({"ev": "AM"});
+        assert!(parse_tick("polygon", &json).is_none());
+    }
+
+    #[test]
+    fn test_parse_tick_alpaca_empty_array_returns_none() {
+        let json: serde_json::Value = serde_json::json!({"T": []});
+        assert!(parse_tick("alpaca", &json).is_none());
+    }
+
+    #[test]
+    fn test_tick_serialization() {
+        let tick = Tick {
+            symbol: "AAPL".into(),
+            price: 150.25,
+            volume: 100.0,
+            timestamp: 1234567890,
+        };
+        let serialized = serde_json::to_string(&tick).unwrap();
+        let expected = r#"{"symbol":"AAPL","price":150.25,"volume":100.0,"timestamp":1234567890}"#;
+        assert_eq!(serialized, expected);
+    }
+
+    #[test]
+    fn test_tick_deserialization_roundtrip() {
+        let tick = Tick {
+            symbol: "TSLA".into(),
+            price: 200.0,
+            volume: 500.0,
+            timestamp: 987654321,
+        };
+        let serialized = serde_json::to_string(&tick).unwrap();
+        let deserialized: Tick = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.symbol, "TSLA");
+        assert!((deserialized.price - 200.0).abs() < f64::EPSILON);
+        assert!((deserialized.volume - 500.0).abs() < f64::EPSILON);
+        assert_eq!(deserialized.timestamp, 987654321);
+    }
 }

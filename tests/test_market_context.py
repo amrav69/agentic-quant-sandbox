@@ -6,16 +6,14 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
+import pandas_ta as ta  # noqa: F401  — registers .ta accessor on DataFrames
 
 from backend.quant.market_context import get_market_context
-from backend.quant.indicators import calculate_indicators
 
 
 class TestIndicators:
     def test_calculate_indicators_with_mock_data(self, sample_ohlcv):
         """Verify indicator functions work with a known sample DataFrame."""
-        import pandas_ta as ta
 
         df = sample_ohlcv.copy()
         rsi = df.ta.rsi(length=14)
@@ -28,7 +26,6 @@ class TestIndicators:
         assert rsi.dropna().notna().all()
 
     def test_ema_calculation(self, sample_ohlcv):
-        import pandas_ta as ta
 
         df = sample_ohlcv.copy()
         ema20 = df.ta.ema(length=20)
@@ -36,7 +33,6 @@ class TestIndicators:
         assert len(ema20) == len(df)
 
     def test_macd_calculation(self, sample_ohlcv):
-        import pandas_ta as ta
 
         df = sample_ohlcv.copy()
         macd = df.ta.macd(fast=12, slow=26, signal=9)
@@ -45,7 +41,6 @@ class TestIndicators:
         assert macd.shape[1] == 3
 
     def test_atr_calculation(self, sample_ohlcv):
-        import pandas_ta as ta
 
         df = sample_ohlcv.copy()
         atr = df.ta.atr(length=14)
