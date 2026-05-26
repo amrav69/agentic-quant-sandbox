@@ -85,9 +85,8 @@ python tui.py
 docker compose up --build
 ```
 
-This starts three services:
+This starts two services:
 - **api** — FastAPI server on port 8000
-- **redis** — Cache backend
 - **tui** — Terminal UI (requires a terminal that supports Textual)
 
 ---

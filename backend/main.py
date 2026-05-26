@@ -295,9 +295,9 @@ async def analyze_stream(data: CritiqueRequest):
             })
             yield _sse_event("critic", "done", result=critique_result)
 
-        except Exception as exc:
+        except Exception:
             logger.exception("Streaming pipeline failed")
-            yield _sse_event("error", "failed", message=str(exc))
+            yield _sse_event("error", "failed", message="Pipeline execution failed")
 
     return StreamingResponse(
         event_generator(),
