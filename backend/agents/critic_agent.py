@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from backend.llm_client import get_groq_client
+from backend.risk.engine import RiskChecker, TradeValidator, RiskConfig
 import json
 import re
 from typing import Dict, Any
@@ -103,6 +104,24 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
 
             # Clean and parse JSON from the LLM response
             parsed_critique = self._parse_json(content)
+
+            # Run quantitative risk checks and append risk flags
+            risk_flags = self._run_risk_checks(research_analysis, generated_code)
+
+            if risk_flags:
+                parsed_critique.setdefault("risk_flags", []).extend(risk_flags)
+                parsed_critique["action"] = "HOLD"
+
+                issues = parsed_critique.setdefault("issues", [])
+                for flag in risk_flags:
+                    issues.append({
+                        "severity": "serious",
+                        "issue": f"Risk check failed: {flag}"
+                    })
+
+                if parsed_critique.get("verdict") != "FAIL":
+                    parsed_critique["verdict"] = "FAIL"
+
             return parsed_critique
 
         except Exception as e:
@@ -113,7 +132,54 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
                 "suggestions": ["Check client connectivity to Groq LLM API."]
             }
 
-    def _parse_json(self, raw_content: str) -> Dict[str, Any]:
+    def _run_risk_checks(
+        self,
+        research_analysis: Dict[str, Any],
+        generated_code: Dict[str, Any]
+    ) -> list[str]:
+        """Run quantitative risk checks and return a list of flag messages."""
+        flags: list[str] = []
+        symbol = research_analysis.get("raw_data", {}).get("symbol", "UNKNOWN")
+        analysis = research_analysis.get("analysis", "")
+
+        # Extract signal-like info from the research analysis text
+        signal = {
+            "symbol": symbol,
+            "side": "BUY",
+            "entry": 0.0,
+            "stop": 0.0,
+            "size": 0,
+        }
+
+        # Build a minimal portfolio state for validation
+        portfolio_state: Dict[str, Any] = {
+            "equity_curve": [],
+            "positions": {},
+            "returns": None,
+            "returns_list": [],
+            "capital": 100_000.0,
+        }
+
+        # Run trade validation
+        validator = TradeValidator()
+        approved, reasons = validator.validate(signal, portfolio_state)
+        if not approved:
+            flags.extend(reasons)
+
+        # Check if the research itself mentions high-risk patterns
+        risk_keywords = [
+            "high leverage", "no stop", "overfit", "lookahead",
+            "survivorship", "data snooping",
+        ]
+        analysis_lower = analysis.lower() if analysis else ""
+        for kw in risk_keywords:
+            if kw in analysis_lower:
+                flags.append(f"Research analysis mentions risk pattern: '{kw}'")
+
+        return flags
+
+    @staticmethod
+    def _parse_json(raw_content: str) -> Dict[str, Any]:
         # Try direct parse first
         try:
             return json.loads(raw_content)
