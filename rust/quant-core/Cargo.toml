@@ -28,6 +28,7 @@ path = "tests/indicators_test.rs"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
 
 [[bench]]
 name = "indicators_bench"

@@ -1,4 +1,4 @@
-.PHONY: install dev test build lint fmt docker-up docker-down clean
+.PHONY: install dev test build lint fmt audit coverage fuzz docker-up docker-down clean
 
 install:
 	pip install -r requirements.txt -r requirements-dev.txt
@@ -12,7 +12,7 @@ dev:
 
 test:
 	@echo "--- Python ---"
-	pytest --tb=short -q
+	pytest --tb=short -q --cov=backend --cov-report=term-missing
 	@echo ""
 	@echo "--- Rust ---"
 	cargo test --workspace
@@ -34,6 +34,24 @@ fmt:
 	@echo "--- Rust ---"
 	cargo fmt --all
 
+audit:
+	@echo "--- Python (pip-audit) ---"
+	pip-audit -r requirements.txt -r requirements-dev.txt --desc on
+	@echo ""
+	@echo "--- Rust (cargo audit) ---"
+	cargo audit
+
+coverage:
+	@echo "--- Python ---"
+	pytest --tb=short --cov=backend --cov-report=html --cov-report=term-missing
+	@echo ""
+	@echo "--- Rust (cargo-tarpaulin) ---"
+	cargo tarpaulin --workspace --out Html --output-dir tarpaulin_html
+
+fuzz:
+	@echo "--- Rust (cargo fuzz) ---"
+	cargo fuzz run fuzz_calc_rsi -- -max_total_time=30
+
 docker-up:
 	docker compose up --build -d
 
@@ -41,5 +59,5 @@ docker-down:
 	docker compose down
 
 clean:
-	rm -rf .venv __pycache__ **/__pycache__ .pytest_cache
+	rm -rf .venv __pycache__ **/__pycache__ .pytest_cache coverage_html tarpaulin_html
 	cargo clean
