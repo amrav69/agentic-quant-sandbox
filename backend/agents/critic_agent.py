@@ -43,7 +43,7 @@ MANDATORY RULES:
 - Always provide minimum 3 issues even on PASS
 - Distinguish fatal flaws from minor concerns using severity levels
 
-SEVERITY LEVELS — every issue must include one of:
+SEVERITY LEVELS: every issue must include one of:
 - fatal
 - serious
 - warning
@@ -70,10 +70,10 @@ OUTPUT REQUIREMENTS:
     async def critique(self, codegen_output: Dict[str, Any]) -> Dict[str, Any]:
         """
         Critiques a quantitative strategy backtest and analysis.
-        
+
         Args:
             codegen_output (dict): Contains "research_analysis" and "generated_code".
-            
+
         Returns:
             Dict[str, Any]: The structured risk review response.
         """
@@ -102,10 +102,8 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
             response = await self.llm.ainvoke(messages)
             content = response.content.strip()
 
-            # Clean and parse JSON from the LLM response
-            parsed_critique = self._parse_json(content)
+            parsed_critique = CriticAgent._parse_json(content)
 
-            # Run quantitative risk checks and append risk flags
             risk_flags = self._run_risk_checks(research_analysis, generated_code)
 
             if risk_flags:
@@ -139,19 +137,22 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
     ) -> list[str]:
         """Run quantitative risk checks and return a list of flag messages."""
         flags: list[str] = []
-        symbol = research_analysis.get("raw_data", {}).get("symbol", "UNKNOWN")
+        raw_data = research_analysis.get("raw_data", {})
+        symbol = raw_data.get("symbol", "UNKNOWN")
         analysis = research_analysis.get("analysis", "")
 
-        # Extract signal-like info from the research analysis text
+        # Extract real trade parameters from raw payload data when available.
+        raw_price = raw_data.get("price") or raw_data.get("current_price")
+        entry_price = raw_price if isinstance(raw_price, (int, float)) else 0.0
+
         signal = {
             "symbol": symbol,
             "side": "BUY",
-            "entry": 0.0,
-            "stop": 0.0,
-            "size": 0,
+            "entry": entry_price,
+            "stop": entry_price * 0.95 if entry_price > 0 else 0.0,
+            "size": 100,
         }
 
-        # Build a minimal portfolio state for validation
         portfolio_state: Dict[str, Any] = {
             "equity_curve": [],
             "positions": {},
@@ -160,7 +161,6 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
             "capital": 100_000.0,
         }
 
-        # Run trade validation
         validator = TradeValidator()
         approved, reasons = validator.validate(signal, portfolio_state)
         if not approved:
@@ -172,9 +172,10 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
             "survivorship", "data snooping",
         ]
         analysis_lower = analysis.lower() if analysis else ""
-        for kw in risk_keywords:
-            if kw in analysis_lower:
-                flags.append(f"Research analysis mentions risk pattern: '{kw}'")
+        if any(kw in analysis_lower for kw in risk_keywords):
+            for kw in risk_keywords:
+                if kw in analysis_lower:
+                    flags.append(f"Research analysis mentions risk pattern: '{kw}'")
 
         return flags
 

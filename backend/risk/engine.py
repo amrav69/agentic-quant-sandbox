@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,9 +19,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Configuration
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -38,14 +39,27 @@ class RiskConfig:
     default_confidence: float = 0.95
     min_trade_count: int = 30
 
+    @classmethod
+    def from_env(cls) -> RiskConfig:
+        """Build a RiskConfig from environment variables with sensible fallbacks."""
+        return cls(
+            max_position_pct=float(os.getenv("MAX_POSITION_PCT", "0.20")),
+            max_drawdown_pct=float(os.getenv("MAX_DRAWDOWN_PCT", "0.25")),
+            max_var_1d=float(os.getenv("MAX_VAR_1D", "0.02")),
+            max_correlation=float(os.getenv("MAX_CORRELATION", "0.85")),
+            kelly_cap=float(os.getenv("KELLY_CAP", "0.25")),
+            default_confidence=float(os.getenv("DEFAULT_CONFIDENCE", "0.95")),
+            min_trade_count=int(os.getenv("MIN_TRADE_COUNT", "30")),
+        )
+
 
 # Singleton-ish default; callers can override by passing a custom config.
-DEFAULT_CONFIG = RiskConfig()
+DEFAULT_CONFIG = RiskConfig.from_env()
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Position Sizer
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 class PositionSizer:
@@ -78,8 +92,16 @@ class PositionSizer:
         if avg_loss <= 0 or avg_win <= 0:
             return 0.0
 
+        # Reject loss ratios that imply complete capital loss
+        if avg_loss >= 1.0:
+            return 0.0
+
         # R = win / loss (net returns)
-        r = (avg_win - 1.0) / (1.0 - avg_loss) if (1.0 - avg_loss) > 0 else 0.0
+        one_minus_loss = 1.0 - avg_loss
+        if one_minus_loss <= 0:
+            return 0.0
+
+        r = (avg_win - 1.0) / one_minus_loss
         kelly = win_rate - (1.0 - win_rate) / r if r > 0 else 0.0
         return max(0.0, min(kelly, cap))
 
@@ -99,7 +121,7 @@ class PositionSizer:
         if entry <= 0 or stop <= 0 or capital <= 0 or risk_pct <= 0:
             return 0
         risk_per_share = abs(entry - stop)
-        if risk_per_share < 1e-12:
+        if math.isclose(risk_per_share, 0.0):
             return 0
         dollars_at_risk = capital * risk_pct
         return max(0, int(dollars_at_risk / risk_per_share))
@@ -121,14 +143,14 @@ class PositionSizer:
             return 0
         dollars_at_risk = capital * risk_pct
         volatility_risk = atr / entry  # fraction of price
-        if volatility_risk < 1e-12:
+        if math.isclose(volatility_risk, 0.0):
             return 0
         return max(0, int(dollars_at_risk / (entry * volatility_risk)))
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Risk Checker
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 class RiskChecker:
@@ -161,9 +183,9 @@ class RiskChecker:
         positions: dict[str, float], max_single_pct: float = 0.20
     ) -> list[str]:
         """Return list of symbol keys whose allocation exceeds *max_single_pct*."""
-        total = sum(positions.values()) if positions else 1.0
+        total = sum(positions.values()) if positions else 0.0
         if total <= 0:
-            total = 1.0
+            return []
         return [sym for sym, val in positions.items() if (val / total) > max_single_pct]
 
     @staticmethod
@@ -218,9 +240,9 @@ class RiskChecker:
         return abs(float(np.mean(tail)))
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Trade Validator
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 class TradeValidator:
@@ -257,7 +279,7 @@ class TradeValidator:
         symbol = signal.get("symbol", "UNKNOWN")
         side = signal.get("side", "BUY")
 
-        # ── 1.  Position size limit ────────────────────────────────────
+        # -- 1.  Position size limit --------------------------------------
         positions: dict[str, float] = portfolio_state.get("positions", {})
         breaching = RiskChecker.check_position_concentration(
             positions, cfg.max_position_pct
@@ -268,7 +290,7 @@ class TradeValidator:
                 f"exceeds {cfg.max_position_pct:.0%} limit"
             )
 
-        # ── 2.  Drawdown check ────────────────────────────────────────
+        # -- 2.  Drawdown check -------------------------------------------
         equity_curve: list[float] = portfolio_state.get("equity_curve", [])
         dd_ok, current_dd = RiskChecker.check_max_drawdown(
             equity_curve, cfg.max_drawdown_pct
@@ -278,7 +300,7 @@ class TradeValidator:
                 f"Max drawdown {current_dd:.1%} exceeds limit {cfg.max_drawdown_pct:.0%}"
             )
 
-        # ── 3.  Correlation check ─────────────────────────────────────
+        # -- 3.  Correlation check ----------------------------------------
         returns_df: pd.DataFrame | None = portfolio_state.get("returns")
         if returns_df is not None and not returns_df.empty:
             high_corr = RiskChecker.check_correlation(returns_df, cfg.max_correlation)
@@ -289,7 +311,7 @@ class TradeValidator:
                         f"exceeds limit {cfg.max_correlation:.0%}"
                     )
 
-        # ── 4.  VaR budget check ──────────────────────────────────────
+        # -- 4.  VaR budget check -----------------------------------------
         returns_list: list[float] = portfolio_state.get("returns_list", [])
         if returns_list:
             var_val = RiskChecker.var_historical(returns_list, cfg.default_confidence)
@@ -298,7 +320,7 @@ class TradeValidator:
                     f"1d VaR {var_val:.1%} exceeds budget {cfg.max_var_1d:.0%}"
                 )
 
-        # ── 5.  Side sanity (no short if not allowed, etc.) ────────────
+        # -- 5.  Side sanity (no short if not allowed, etc.) --------------
         if side not in ("BUY", "SELL"):
             reasons.append(f"Invalid trade side: {side}")
 

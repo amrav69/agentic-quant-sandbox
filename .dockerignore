@@ -1,0 +1,36 @@
+# Dependencies
+backend/**/__pycache__/
+**/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+
+# Rust build artifacts
+rust/target/
+target/
+
+# Environment
+.env
+.env.local
+
+# Python
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

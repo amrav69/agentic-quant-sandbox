@@ -1,7 +1,7 @@
 .PHONY: install dev test build lint fmt docker-up docker-down clean
 
 install:
-	pip install -r requirements.txt
+	pip install -r requirements.txt -r requirements-dev.txt
 	cp -n .env.example .env 2>/dev/null || true
 	@echo "--- Rust ---"
 	cargo build --workspace

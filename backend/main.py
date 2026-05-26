@@ -6,11 +6,11 @@ and a full 3-agent critique pipeline with streaming support.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
+from pydantic import BaseModel
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -28,20 +28,53 @@ setup_logging()
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+
+class AnalyzeRequest(BaseModel):
+    symbol: str
+    price: float | None = None
+    rsi: float | None = None
+    macd_line: float | None = None
+    macd_signal: float | None = None
+    ema20: float | None = None
+    ema50: float | None = None
+    atr: float | None = None
+    volume_trend: str | None = None
+
+
+class GenerateRequest(BaseModel):
+    symbol: str | None = None
+    price: float | None = None
+
+
+class CritiqueRequest(BaseModel):
+    symbol: str | None = None
+    price: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
 app = FastAPI(
     title="Agentic Quant Sandbox",
-    description="AI-powered autonomous trading strategy engine — "
-    "multi-agent system with Research, CodeGen, and Critic agents "
-    "that analyze markets, write backtests, and validate strategies.",
+    description=(
+        "AI-powered autonomous trading strategy engine -- "
+        "multi-agent system with Research, CodeGen, and Critic agents "
+        "that analyze markets, write backtests, and validate strategies."
+    ),
     version="0.1.0",
 )
 
-# Lazy agent singletons — initialised on first request so that
+# Lazy agent singletons -- initialised on first request so that
 # tests can patch dependencies (e.g. get_groq_client) beforehand.
 _agents: dict[str, ResearchAgent | CodeGenAgent | CriticAgent] = {}
 
 
-def _get_agents() -> dict:
+def _get_agents() -> dict[str, ResearchAgent | CodeGenAgent | CriticAgent]:
     if not _agents:
         _agents["research"] = ResearchAgent()
         _agents["codegen"] = CodeGenAgent()
@@ -49,9 +82,9 @@ def _get_agents() -> dict:
     return _agents
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Middleware: log every request + duration header
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 @app.middleware("http")
@@ -70,9 +103,9 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Health / status
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 @app.get("/")
@@ -85,30 +118,29 @@ async def health():
     return {"status": "healthy"}
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Cache management
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 @app.post("/cache/clear")
 async def clear_cache():
     """Flush the TTL cache for market data fetches."""
-    fn = fetch_market_data
-    if hasattr(fn, "cache_clear"):
-        fn.cache_clear()
+    if hasattr(fetch_market_data, "cache_clear"):
+        fetch_market_data.cache_clear()
     return {"status": "cache cleared"}
 
 
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /analyze endpoints
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 
 @app.post("/analyze")
-async def analyze_market(data: dict):
+async def analyze_market(data: AnalyzeRequest):
     start = time.perf_counter()
     agents = _get_agents()
-    result = await agents["research"].analyze(data)
+    result = await agents["research"].analyze(data.model_dump())
     elapsed = int((time.perf_counter() - start) * 1000)
     logger.info("POST /analyze completed in %d ms", elapsed)
     return result
@@ -116,23 +148,25 @@ async def analyze_market(data: dict):
 
 @app.get("/analyze/{symbol}")
 async def analyze_market_autonomous(symbol: str):
-    """Fully autonomous analysis: fetch data → indicators → AI analysis."""
+    """Fully autonomous analysis: fetch data -> indicators -> AI analysis."""
     symbol_upper = symbol.upper()
     start = time.perf_counter()
 
     try:
         live_data = fetch_market_data(symbol_upper)
-    except ValueError as ve:
-        raise HTTPException(status_code=404, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Symbol not found")
+    except Exception:
+        logger.exception("Failed to fetch market data for %s", symbol_upper)
+        raise HTTPException(status_code=400, detail="Failed to fetch market data")
 
     try:
         indicators = calculate_indicators(symbol_upper)
-    except ValueError as ve:
-        raise HTTPException(status_code=404, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Symbol not found")
+    except Exception:
+        logger.exception("Failed to calculate indicators for %s", symbol_upper)
+        raise HTTPException(status_code=400, detail="Failed to calculate indicators")
 
     ema20 = indicators.get("EMA20")
     ema50 = indicators.get("EMA50")
@@ -164,9 +198,7 @@ async def analyze_market_autonomous(symbol: str):
     agents = _get_agents()
     ai_response = await agents["research"].analyze(market_data_payload)
     elapsed = int((time.perf_counter() - start) * 1000)
-    logger.info(
-        "GET /analyze/%s completed in %d ms", symbol_upper, elapsed
-    )
+    logger.info("GET /analyze/%s completed in %d ms", symbol_upper, elapsed)
 
     return {
         "symbol": symbol_upper,
@@ -175,18 +207,18 @@ async def analyze_market_autonomous(symbol: str):
     }
 
 
-# ──────────────────────────────────────────────────────────────────────
-# /generate — backtest code generation
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# /generate -- backtest code generation
+# ---------------------------------------------------------------------------
 
 
 @app.post("/generate")
-async def generate_backtest(data: dict):
-    """Research → CodeGen pipeline (sequential)."""
+async def generate_backtest(data: GenerateRequest):
+    """Research -> CodeGen pipeline (sequential)."""
     start = time.perf_counter()
     agents = _get_agents()
     try:
-        research_result = await agents["research"].analyze(data)
+        research_result = await agents["research"].analyze(data.model_dump())
         generated_code_result = await agents["codegen"].generate(research_result)
         elapsed = int((time.perf_counter() - start) * 1000)
         logger.info("POST /generate completed in %d ms", elapsed)
@@ -194,31 +226,24 @@ async def generate_backtest(data: dict):
             "research_analysis": research_result,
             "generated_code": generated_code_result,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Failed to generate backtest")
+        raise HTTPException(status_code=500, detail="Pipeline execution failed")
 
 
-# ──────────────────────────────────────────────────────────────────────
-# /critique — full 3-agent pipeline (Research → CodeGen → Critic)
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# /critique -- full 3-agent pipeline (Research -> CodeGen -> Critic)
+# ---------------------------------------------------------------------------
 
 
 @app.post("/critique")
-async def critique_strategy(data: dict):
-    """Full 3-agent pipeline with concurrent CodeGen + Critic where possible."""
+async def critique_strategy(data: CritiqueRequest):
+    """Full 3-agent pipeline: research then codegen then critic."""
     start = time.perf_counter()
     agents = _get_agents()
     try:
-        research_result = await agents["research"].analyze(data)
-
-        generated_code, _ = await asyncio.gather(
-            agents["codegen"].generate(research_result),
-            agents["critic"].critique({
-                "research_analysis": research_result,
-                "generated_code": {"code": "", "based_on": ""},
-            }),
-        )
-
+        research_result = await agents["research"].analyze(data.model_dump())
+        generated_code = await agents["codegen"].generate(research_result)
         critique_result = await agents["critic"].critique({
             "research_analysis": research_result,
             "generated_code": generated_code,
@@ -232,29 +257,31 @@ async def critique_strategy(data: dict):
             "generated_code": generated_code,
             "critique": critique_result,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Critique pipeline failed")
+        raise HTTPException(status_code=500, detail="Pipeline execution failed")
 
 
-# ──────────────────────────────────────────────────────────────────────
-# /analyze/stream — streaming pipeline
-# ──────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# /analyze/stream -- streaming pipeline
+# ---------------------------------------------------------------------------
 
 
-def _sse_event(stage: str, status: str, **kwargs) -> str:
-    payload = {"stage": stage, "status": status, **kwargs}
+def _sse_event(stage: str, status: str, **kwargs: Any) -> str:
+    payload: dict[str, Any] = {"stage": stage, "status": status}
+    payload.update(kwargs)
     return f"data: {json.dumps(payload)}\n\n"
 
 
 @app.post("/analyze/stream")
-async def analyze_stream(data: dict):
+async def analyze_stream(data: CritiqueRequest):
     """Stream the 3-agent pipeline as newline-delimited JSON events."""
 
     async def event_generator() -> AsyncGenerator[str, None]:
         agents = _get_agents()
         try:
             yield _sse_event("research", "running")
-            research_result = await agents["research"].analyze(data)
+            research_result = await agents["research"].analyze(data.model_dump())
             yield _sse_event("research", "done", result=research_result)
 
             yield _sse_event("codegen", "running")
@@ -269,6 +296,7 @@ async def analyze_stream(data: dict):
             yield _sse_event("critic", "done", result=critique_result)
 
         except Exception as exc:
+            logger.exception("Streaming pipeline failed")
             yield _sse_event("error", "failed", message=str(exc))
 
     return StreamingResponse(

@@ -35,13 +35,13 @@ class TestAnalyze:
 
     async def test_analyze_empty_body(self, test_app):
         resp = await test_app.post("/analyze", json={})
-        # The endpoint accepts any JSON object (dict), so empty body is OK
-        assert resp.status_code == 200
+        # Pydantic requires 'symbol' field
+        assert resp.status_code == 422
 
     async def test_analyze_missing_symbol(self, test_app):
         resp = await test_app.post("/analyze", json={"price": 100.0})
-        # No Pydantic validation on the raw dict — passes through
-        assert resp.status_code == 200
+        # Pydantic requires 'symbol' field
+        assert resp.status_code == 422
 
     async def test_analyze_invalid_json(self, test_app):
         resp = await test_app.post("/analyze", content=b"not json")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,8 +15,6 @@ from backend.quant.indicators import calculate_indicators
 class TestIndicators:
     def test_calculate_indicators_with_mock_data(self, sample_ohlcv):
         """Verify indicator functions work with a known sample DataFrame."""
-        # calculate_indicators normally fetches via yfinance; we instead
-        # verify the pandas-ta layer works by calling it directly
         import pandas_ta as ta
 
         df = sample_ohlcv.copy()
@@ -54,15 +54,37 @@ class TestIndicators:
 
 
 class TestMarketContext:
-    def test_market_context_returns_expected_keys(self, sample_ohlcv):
-        """get_market_context normally calls yfinance; test the shape of the
-        return dictionary by patching yfinance to return the fixture."""
+    def test_market_context_returns_expected_keys(self):
+        """get_market_context normally calls yfinance. Patch Ticker.history
+        to return enough data for all timeframes and verify the return dict shape."""
+        np.random.seed(42)
+        n = 500
+        closes = 100.0 + np.cumsum(np.random.randn(n) * 0.5)
+        highs = closes + np.abs(np.random.randn(n) * 0.3)
+        lows = closes - np.abs(np.random.randn(n) * 0.3)
+        opens = closes + np.random.randn(n) * 0.1
 
-        # We can't easily call get_market_context without yfinance, so
-        # verify the expected return structure
+        index = pd.date_range("2025-01-01", periods=n, freq="h")
+        big_df = pd.DataFrame(
+            {
+                "Open": opens,
+                "High": highs,
+                "Low": lows,
+                "Close": closes,
+                "Volume": np.random.randint(100_000, 1_000_000, size=n),
+            },
+            index=index,
+        )
+
+        with patch("backend.quant.market_context.yf.Ticker") as mock_ticker:
+            mock_instance = mock_ticker.return_value
+            mock_instance.history.return_value = big_df
+            mock_instance.info = {"symbol": "TEST"}
+            result = get_market_context("TEST")
+
         expected_keys = {
             "symbol", "timeframes", "market_regime",
             "volatility_regime", "trend_alignment"
         }
-        # At minimum, the function signature suggests these keys
-        assert "symbol" in expected_keys
+        assert expected_keys.issubset(result.keys())
+        assert result["symbol"] == "TEST"

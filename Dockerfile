@@ -27,10 +27,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy Python source
+# Copy Python source (not tests -- they're dev-only)
 COPY backend/ ./backend/
 COPY tui.py .
-COPY tests/ ./tests/
 
 # Copy compiled Rust binary
 COPY --from=rust-builder /usr/local/bin/feed-ingestor /usr/local/bin/feed-ingestor

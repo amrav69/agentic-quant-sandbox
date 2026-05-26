@@ -104,13 +104,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     write.send(tokio_tungstenite::tungstenite::Message::Text(sub_text)).await?;
     tracing::info!("Subscription sent for {:?}", symbols);
 
-    let mut msg_count = 0u64;
-    let max_msgs = if args.dry_run { 5u64 } else { u64::MAX };
+    let max_msgs: u64 = if args.dry_run { 5 } else { u64::MAX };
 
     let ctrl_c = signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
-    while msg_count < max_msgs {
+    let mut msg_count: u64 = 0;
+    for _ in 0..max_msgs {
         tokio::select! {
             msg = read.next() => {
                 match msg {
