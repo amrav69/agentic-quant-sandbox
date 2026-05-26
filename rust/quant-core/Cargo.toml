@@ -25,3 +25,10 @@ features = ["extension-module"]
 [[test]]
 name = "indicators_test"
 path = "tests/indicators_test.rs"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "indicators_bench"
+harness = false
