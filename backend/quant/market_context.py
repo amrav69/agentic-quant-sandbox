@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+import pandas_ta as ta  # noqa: F401  — registers .ta accessor on DataFrames
 from typing import Dict, Any
 
 def get_market_context(symbol: str = "BTC-USD") -> Dict[str, Any]:

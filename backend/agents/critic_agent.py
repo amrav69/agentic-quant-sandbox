@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from backend.llm_client import get_groq_client
+from backend.risk.engine import TradeValidator
 import json
 import re
 from typing import Dict, Any
@@ -42,7 +43,7 @@ MANDATORY RULES:
 - Always provide minimum 3 issues even on PASS
 - Distinguish fatal flaws from minor concerns using severity levels
 
-SEVERITY LEVELS — every issue must include one of:
+SEVERITY LEVELS: every issue must include one of:
 - fatal
 - serious
 - warning
@@ -69,10 +70,10 @@ OUTPUT REQUIREMENTS:
     async def critique(self, codegen_output: Dict[str, Any]) -> Dict[str, Any]:
         """
         Critiques a quantitative strategy backtest and analysis.
-        
+
         Args:
             codegen_output (dict): Contains "research_analysis" and "generated_code".
-            
+
         Returns:
             Dict[str, Any]: The structured risk review response.
         """
@@ -101,8 +102,24 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
             response = await self.llm.ainvoke(messages)
             content = response.content.strip()
 
-            # Clean and parse JSON from the LLM response
-            parsed_critique = self._parse_json(content)
+            parsed_critique = CriticAgent._parse_json(content)
+
+            risk_flags = self._run_risk_checks(research_analysis, generated_code)
+
+            if risk_flags:
+                parsed_critique.setdefault("risk_flags", []).extend(risk_flags)
+                parsed_critique["action"] = "HOLD"
+
+                issues = parsed_critique.setdefault("issues", [])
+                for flag in risk_flags:
+                    issues.append({
+                        "severity": "serious",
+                        "issue": f"Risk check failed: {flag}"
+                    })
+
+                if parsed_critique.get("verdict") != "FAIL":
+                    parsed_critique["verdict"] = "FAIL"
+
             return parsed_critique
 
         except Exception as e:
@@ -113,7 +130,57 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
                 "suggestions": ["Check client connectivity to Groq LLM API."]
             }
 
-    def _parse_json(self, raw_content: str) -> Dict[str, Any]:
+    def _run_risk_checks(
+        self,
+        research_analysis: Dict[str, Any],
+        generated_code: Dict[str, Any]
+    ) -> list[str]:
+        """Run quantitative risk checks and return a list of flag messages."""
+        flags: list[str] = []
+        raw_data = research_analysis.get("raw_data", {})
+        symbol = raw_data.get("symbol", "UNKNOWN")
+        analysis = research_analysis.get("analysis", "")
+
+        # Extract real trade parameters from raw payload data when available.
+        raw_price = raw_data.get("price") or raw_data.get("current_price")
+        entry_price = raw_price if isinstance(raw_price, (int, float)) else 0.0
+
+        signal = {
+            "symbol": symbol,
+            "side": "BUY",
+            "entry": entry_price,
+            "stop": entry_price * 0.95 if entry_price > 0 else 0.0,
+            "size": 100,
+        }
+
+        portfolio_state: Dict[str, Any] = {
+            "equity_curve": [],
+            "positions": {},
+            "returns": None,
+            "returns_list": [],
+            "capital": 100_000.0,
+        }
+
+        validator = TradeValidator()
+        approved, reasons = validator.validate(signal, portfolio_state)
+        if not approved:
+            flags.extend(reasons)
+
+        # Check if the research itself mentions high-risk patterns
+        risk_keywords = [
+            "high leverage", "no stop", "overfit", "lookahead",
+            "survivorship", "data snooping",
+        ]
+        analysis_lower = analysis.lower() if analysis else ""
+        if any(kw in analysis_lower for kw in risk_keywords):
+            for kw in risk_keywords:
+                if kw in analysis_lower:
+                    flags.append(f"Research analysis mentions risk pattern: '{kw}'")
+
+        return flags
+
+    @staticmethod
+    def _parse_json(raw_content: str) -> Dict[str, Any]:
         # Try direct parse first
         try:
             return json.loads(raw_content)

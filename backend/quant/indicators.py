@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+import pandas_ta as ta  # noqa: F401  — registers .ta accessor on DataFrames
 from typing import Dict, Any
 
 def calculate_indicators(symbol: str = "BTC-USD") -> Dict[str, Any]:
@@ -73,7 +73,7 @@ def calculate_indicators(symbol: str = "BTC-USD") -> Dict[str, Any]:
                 raise ValueError("Series is empty or None.")
             valid_series = series.dropna()
             if valid_series.empty:
-                raise ValueError(f"Indicator calculation returned all NaN values for series.")
+                raise ValueError("Indicator calculation returned all NaN values for series.")
             return float(valid_series.iloc[-1])
             
         # --- Extract values safely ---

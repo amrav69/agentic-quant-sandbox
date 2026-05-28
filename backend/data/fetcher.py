@@ -1,58 +1,58 @@
-import yfinance as yf
-from typing import Dict, Any
+"""Market data fetcher with TTL caching.
 
-def fetch_market_data(symbol: str = "BTC-USD") -> Dict[str, Any]:
-    """
-    Fetches the latest 1-minute candle market data for a given ticker symbol using yfinance.
+Uses yfinance to fetch OHLCV data and caches results with a 5-minute TTL.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import yfinance as yf
+
+from backend.cache import ttl_cache
+
+logger = logging.getLogger(__name__)
+
+
+@ttl_cache(maxsize=128, ttl=300)
+def fetch_market_data(symbol: str = "BTC-USD") -> dict[str, Any]:
+    """Fetches the latest 1-minute candle market data for a given ticker symbol.
+
+    Results are cached for 300 seconds (5 minutes) keyed by symbol.
 
     Args:
-        symbol (str): The ticker symbol to fetch (e.g., "BTC-USD", "AAPL"). Defaults to "BTC-USD".
+        symbol: The ticker symbol to fetch (e.g. "BTC-USD", "AAPL").
 
     Returns:
-        Dict[str, Any]: A dictionary containing:
-            - symbol (str): The ticker symbol (uppercase)
-            - current price (float): The latest closing price of the 1-minute candle
-            - open (float): The opening price of the 1-minute candle
-            - high (float): The highest price of the 1-minute candle
-            - low (float): The lowest price of the 1-minute candle
-            - volume (int): The volume of the 1-minute candle
+        A dict with ``symbol``, ``current_price``, ``open``, ``high``, ``low``,
+        ``volume``.
 
     Raises:
-        ValueError: If no data was returned for the symbol.
-        RuntimeError: For other errors during data retrieval.
+        ValueError: No data returned for the symbol.
+        RuntimeError: Other errors during data retrieval.
     """
+    logger.debug("Fetching market data for %s", symbol)
     try:
-        # Create a yfinance Ticker instance for the given symbol
         ticker = yf.Ticker(symbol)
-        
-        # Fetch the latest 1-minute candle data for today (1d period)
         data = ticker.history(period="1d", interval="1m")
-        
-        # Check if the DataFrame is empty (e.g., invalid symbol or no data available)
+
         if data.empty:
-            raise ValueError(f"No market data found for symbol: '{symbol}'. Please verify the symbol is correct.")
-        
-        # Get the latest candle (the very last row in the retrieved DataFrame)
-        latest_candle = data.iloc[-1]
-        
-        # Extract and format the market data into a clean python dictionary.
-        # We explicitly cast numpy data types to native Python float/int types
-        # to ensure the dictionary is fully JSON-serializable.
+            raise ValueError(f"No market data found for symbol: '{symbol}'.")
+
+        latest = data.iloc[-1]
         result = {
             "symbol": symbol.upper(),
-            "current price": float(latest_candle["Close"]),
-            "current_price": float(latest_candle["Close"]),  # Adding current_price as a camel_case alias for programmatic safety
-            "open": float(latest_candle["Open"]),
-            "high": float(latest_candle["High"]),
-            "low": float(latest_candle["Low"]),
-            "volume": int(latest_candle["Volume"])
+            "current_price": float(latest["Close"]),
+            "open": float(latest["Open"]),
+            "high": float(latest["High"]),
+            "low": float(latest["Low"]),
+            "volume": int(latest["Volume"]),
         }
-        
+        logger.debug("Cache miss for %s — fetched %d rows", symbol, len(data))
         return result
 
-    except ValueError as ve:
-        # Re-raise standard value errors for the caller to handle
-        raise ve
+    except ValueError:
+        raise
     except Exception as e:
-        # Wrap any network, parsing, or unexpected errors in a RuntimeError with helpful details
-        raise RuntimeError(f"Failed to fetch market data for '{symbol}': {str(e)}") from e
+        raise RuntimeError(f"Failed to fetch market data for '{symbol}': {e}") from e
