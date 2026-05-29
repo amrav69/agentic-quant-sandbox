@@ -48,11 +48,17 @@ class AnalyzeRequest(BaseModel):
 class GenerateRequest(BaseModel):
     symbol: str | None = None
     price: float | None = None
+    rsi: float | None = None
+    macd: str | None = None
+    volume_trend: str | None = None
 
 
 class CritiqueRequest(BaseModel):
     symbol: str | None = None
     price: float | None = None
+    rsi: float | None = None
+    macd: str | None = None
+    volume_trend: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -67,7 +67,7 @@ Screen {
     padding: 0 2 0 0;
 }
 
-#header-sep {
+#header-sep-1, #header-sep-2 {
     color: #1a3a5c;
     width: auto;
 }
@@ -458,9 +458,9 @@ class HeaderBar(Widget):
 
     def compose(self) -> ComposeResult:
         yield Static("◈ AGENTIC QUANT SANDBOX", id="app-title")
-        yield Static("│", id="header-sep")
+        yield Static("│", id="header-sep-1")
         yield Static("", id="header-clock")
-        yield Static("│", id="header-sep")
+        yield Static("│", id="header-sep-2")
         yield Static("● CONNECTING…", id="backend-status")
 
     def on_mount(self) -> None:
@@ -686,6 +686,10 @@ class AnalyzeView(Widget):
 
     DEFAULT_CSS = ""
 
+    BINDINGS = [
+        Binding("/", "focus_input", "Focus Input", show=False),
+    ]
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="analyze-input-bar"):
             yield Static("[#00d4ff]TICKER[/]  ", classes="section-label")
@@ -698,6 +702,15 @@ class AnalyzeView(Widget):
             yield PipelinePanel("◈ RESEARCH AGENT",  "panel-research")
             yield PipelinePanel("◈ CODEGEN AGENT",   "panel-codegen")
             yield PipelinePanel("◈ CRITIC AGENT",    "panel-critic")
+
+    def on_mount(self) -> None:
+        self.query_one("#ticker-input", Input).focus()
+
+    def action_focus_input(self) -> None:
+        self.query_one("#ticker-input", Input).focus()
+
+    def on_focus(self) -> None:
+        self.query_one("#ticker-input", Input).focus()
 
     @on(Button.Pressed, "#run-btn")
     def _on_run(self, _event: Button.Pressed) -> None:
@@ -811,6 +824,9 @@ class QuantApp(App):
             widget.display = (v == view_name)
         # Keep sidebar in sync
         self.query_one("#sidebar", SidebarNav).active_view = view_name
+        # Focus input when switching to Analyze
+        if view_name == "Analyze":
+            self.query_one("#view-analyze", AnalyzeView).focus()
         # Refresh history table on every switch to History
         if view_name == "History":
             self.query_one("#view-history", HistoryView).refresh_history(
