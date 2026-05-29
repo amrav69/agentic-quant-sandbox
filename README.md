@@ -79,7 +79,6 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
 | **Market Data** | yfinance (1m candles, auto-fallback from 1d → 5d) |
 | **Indicators** | pandas-ta — RSI (14), MACD (12/26/9), EMA (20/50), ATR (14) |
 | **API** | REST + Server-Sent Events (SSE) streaming pipeline |
-| **Python TUI** | Textual (legacy, `tui.py`) |
 | **Rust TUI** | Ratatui + crossterm + tokio + reqwest (`rust/aqs-tui`) |
 | **Rust Core** | quant-core — SMA, EMA, RSI, ATR in safe Rust (`rust/quant-core`) |
 | **Testing** | pytest, pytest-asyncio, hypothesis (property tests), criterion (Rust benchmarks) |
@@ -151,14 +150,6 @@ cargo build --release
 .\target\release\aqs-tui.exe   # Windows
 # ./target/release/aqs-tui     # macOS/Linux
 ```
-
-**Python TUI** (legacy):
-
-```bash
-.\venv\Scripts\python.exe tui.py   # Windows
-# python tui.py                    # macOS/Linux
-```
-
 The TUI connects to the backend at `http://127.0.0.1:8000`. Start the backend before the TUI.
 
 ---
@@ -198,8 +189,6 @@ agentic-quant-sandbox/
 │   ├── test_market_context.py
 │   ├── test_risk_engine.py
 │   ├── test_property.py        # hypothesis property-based tests
-│   └── benchmarks/
-├── tui.py                      # Textual-based Python TUI (legacy)
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml

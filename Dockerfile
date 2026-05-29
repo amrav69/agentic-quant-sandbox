@@ -29,7 +29,6 @@ WORKDIR /app
 
 # Copy Python source (not tests -- they're dev-only)
 COPY backend/ ./backend/
-COPY tui.py .
 
 # Copy compiled Rust binary
 COPY --from=rust-builder /usr/local/bin/feed-ingestor /usr/local/bin/feed-ingestor

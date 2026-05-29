@@ -9,15 +9,3 @@ services:
       - .env
     restart: unless-stopped
 
-  tui:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: python tui.py
-    ports:
-      - "8080:8080"
-    env_file:
-      - .env
-    depends_on:
-      - api
-    restart: unless-stopped
