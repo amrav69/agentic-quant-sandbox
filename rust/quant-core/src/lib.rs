@@ -20,16 +20,31 @@ pub fn calculate_ema(prices: &[f64], period: usize) -> Result<Vec<f64>, QuantErr
 }
 
 /// Pure Rust MACD calculation.
-pub fn calculate_macd(prices: &[f64], fast: usize, slow: usize, signal: usize) -> Result<indicators::MacdOutput, QuantError> {
+pub fn calculate_macd(
+    prices: &[f64],
+    fast: usize,
+    slow: usize,
+    signal: usize,
+) -> Result<indicators::MacdOutput, QuantError> {
     indicators::macd(prices, fast, slow, signal)
 }
 
 /// Pure Rust Bollinger Bands calculation.
-pub fn calculate_bollinger(prices: &[f64], period: usize, std_dev: f64) -> Result<indicators::BollingerOutput, QuantError> {
+pub fn calculate_bollinger(
+    prices: &[f64],
+    period: usize,
+    std_dev: f64,
+) -> Result<indicators::BollingerOutput, QuantError> {
     indicators::bollinger_bands(prices, period, std_dev)
 }
 
-extern "C" fn calc_rsi_impl(prices: *const f64, len: usize, period: usize, out: *mut f64, out_len: *mut usize) -> i32 {
+extern "C" fn calc_rsi_impl(
+    prices: *const f64,
+    len: usize,
+    period: usize,
+    out: *mut f64,
+    out_len: *mut usize,
+) -> i32 {
     if prices.is_null() || out.is_null() || out_len.is_null() {
         return -1;
     }
@@ -64,9 +79,9 @@ pub extern "C" fn calc_rsi(
 
 #[cfg(feature = "python")]
 pub mod python {
+    use crate::calculate_rsi;
     use pyo3::prelude::*;
     use pyo3::PyResult;
-    use crate::calculate_rsi;
 
     #[pyfunction]
     pub fn calculate_rsi_py(prices: Vec<f64>, period: usize) -> PyResult<Vec<f64>> {
@@ -86,7 +101,9 @@ mod tests {
     use super::*;
 
     fn make_data(n: usize) -> Vec<f64> {
-        (0..n).map(|i| 100.0 + (i as f64 * 0.5) + (i as f64).sin()).collect()
+        (0..n)
+            .map(|i| 100.0 + (i as f64 * 0.5) + (i as f64).sin())
+            .collect()
     }
 
     #[test]
@@ -139,7 +156,13 @@ mod tests {
 
     #[test]
     fn test_calc_rsi_ffi_null_pointers() {
-        let result = calc_rsi(std::ptr::null(), 0, 14, std::ptr::null_mut(), std::ptr::null_mut());
+        let result = calc_rsi(
+            std::ptr::null(),
+            0,
+            14,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
         assert_eq!(result, -1);
     }
 

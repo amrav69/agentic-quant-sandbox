@@ -1,7 +1,9 @@
 use quant_core::indicators;
 
 fn make_sine_wave(n: usize) -> Vec<f64> {
-    (0..n).map(|i| 100.0 + (i as f64 * 0.1).sin() * 10.0).collect()
+    (0..n)
+        .map(|i| 100.0 + (i as f64 * 0.1).sin() * 10.0)
+        .collect()
 }
 
 #[test]
@@ -106,8 +108,8 @@ fn test_sma_basic() {
     let result = indicators::sma(&data, 10).unwrap();
     assert_eq!(result.len(), 50);
     for &v in result.iter() {
-            assert!(!v.is_nan(), "SMA values should all be finite");
-        }
+        assert!(!v.is_nan(), "SMA values should all be finite");
+    }
 }
 
 #[test]

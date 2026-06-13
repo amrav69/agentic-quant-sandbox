@@ -1,7 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn make_data(n: usize) -> Vec<f64> {
-    (0..n).map(|i| 100.0 + (i as f64 * 0.5) + (i as f64).sin()).collect()
+    (0..n)
+        .map(|i| 100.0 + (i as f64 * 0.5) + (i as f64).sin())
+        .collect()
 }
 
 fn bench_sma(c: &mut Criterion) {

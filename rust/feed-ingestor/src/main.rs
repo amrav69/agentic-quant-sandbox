@@ -101,7 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Subscribe to symbols
     let sub_msg = build_subscription_message(&args.provider, &symbols);
     let sub_text = serde_json::to_string(&sub_msg)?;
-    write.send(tokio_tungstenite::tungstenite::Message::Text(sub_text)).await?;
+    write
+        .send(tokio_tungstenite::tungstenite::Message::Text(sub_text))
+        .await?;
     tracing::info!("Subscription sent for {:?}", symbols);
 
     let max_msgs: u64 = if args.dry_run { 5 } else { u64::MAX };

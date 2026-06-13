@@ -6,10 +6,7 @@ pub enum QuantError {
     EmptyInput,
 
     #[error("Insufficient data: need at least {required} elements, got {available}")]
-    InsufficientData {
-        required: usize,
-        available: usize,
-    },
+    InsufficientData { required: usize, available: usize },
 
     #[error("Internal error: {0}")]
     Internal(String),

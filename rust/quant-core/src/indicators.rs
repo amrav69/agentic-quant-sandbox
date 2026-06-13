@@ -1,4 +1,8 @@
-use ta::indicators::{BollingerBands as TaBollingerBands, ExponentialMovingAverage as TaEma, Maximum, Minimum, MovingAverageConvergenceDivergence as TaMacd, RelativeStrengthIndex as TaRsi, SimpleMovingAverage as TaSma};
+use ta::indicators::{
+    BollingerBands as TaBollingerBands, ExponentialMovingAverage as TaEma, Maximum, Minimum,
+    MovingAverageConvergenceDivergence as TaMacd, RelativeStrengthIndex as TaRsi,
+    SimpleMovingAverage as TaSma,
+};
 use ta::DataItem;
 use ta::Next;
 
@@ -17,7 +21,14 @@ pub fn sma(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     let mut indicator = TaSma::new(period).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut result = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         let out = indicator.next(&item);
         result.push(out);
     }
@@ -37,7 +48,14 @@ pub fn ema(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     let mut indicator = TaEma::new(period).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut result = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         let out = indicator.next(&item);
         result.push(out);
     }
@@ -57,7 +75,14 @@ pub fn rsi(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     let mut indicator = TaRsi::new(period).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut result = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         let out = indicator.next(&item);
         result.push(out);
     }
@@ -70,7 +95,12 @@ pub struct MacdOutput {
     pub histogram: Vec<f64>,
 }
 
-pub fn macd(data: &[f64], fast: usize, slow: usize, signal: usize) -> Result<MacdOutput, QuantError> {
+pub fn macd(
+    data: &[f64],
+    fast: usize,
+    slow: usize,
+    signal: usize,
+) -> Result<MacdOutput, QuantError> {
     if data.is_empty() {
         return Err(QuantError::EmptyInput);
     }
@@ -80,18 +110,30 @@ pub fn macd(data: &[f64], fast: usize, slow: usize, signal: usize) -> Result<Mac
             available: data.len(),
         });
     }
-    let mut indicator = TaMacd::new(fast, slow, signal).map_err(|e| QuantError::Internal(e.to_string()))?;
+    let mut indicator =
+        TaMacd::new(fast, slow, signal).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut macd_line = Vec::with_capacity(data.len());
     let mut signal_line = Vec::with_capacity(data.len());
     let mut histogram = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         let out = indicator.next(&item);
         macd_line.push(out.macd);
         signal_line.push(out.signal);
         histogram.push(out.histogram);
     }
-    Ok(MacdOutput { macd_line, signal_line, histogram })
+    Ok(MacdOutput {
+        macd_line,
+        signal_line,
+        histogram,
+    })
 }
 
 pub struct BollingerOutput {
@@ -100,7 +142,11 @@ pub struct BollingerOutput {
     pub lower: Vec<f64>,
 }
 
-pub fn bollinger_bands(data: &[f64], period: usize, std_dev: f64) -> Result<BollingerOutput, QuantError> {
+pub fn bollinger_bands(
+    data: &[f64],
+    period: usize,
+    std_dev: f64,
+) -> Result<BollingerOutput, QuantError> {
     if data.is_empty() {
         return Err(QuantError::EmptyInput);
     }
@@ -110,18 +156,30 @@ pub fn bollinger_bands(data: &[f64], period: usize, std_dev: f64) -> Result<Boll
             available: data.len(),
         });
     }
-    let mut indicator = TaBollingerBands::new(period, std_dev).map_err(|e| QuantError::Internal(e.to_string()))?;
+    let mut indicator =
+        TaBollingerBands::new(period, std_dev).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut upper = Vec::with_capacity(data.len());
     let mut middle = Vec::with_capacity(data.len());
     let mut lower = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         let out = indicator.next(&item);
         upper.push(out.upper);
         middle.push(out.average);
         lower.push(out.lower);
     }
-    Ok(BollingerOutput { upper, middle, lower })
+    Ok(BollingerOutput {
+        upper,
+        middle,
+        lower,
+    })
 }
 
 pub fn highest(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
@@ -137,7 +195,14 @@ pub fn highest(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     let mut indicator = Maximum::new(period).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut result = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         result.push(indicator.next(&item));
     }
     Ok(result)
@@ -156,7 +221,14 @@ pub fn lowest(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     let mut indicator = Minimum::new(period).map_err(|e| QuantError::Internal(e.to_string()))?;
     let mut result = Vec::with_capacity(data.len());
     for &v in data {
-        let item = DataItem::builder().close(v).open(v).high(v).low(v).volume(0.0).build().map_err(|e| QuantError::Internal(e.to_string()))?;
+        let item = DataItem::builder()
+            .close(v)
+            .open(v)
+            .high(v)
+            .low(v)
+            .volume(0.0)
+            .build()
+            .map_err(|e| QuantError::Internal(e.to_string()))?;
         result.push(indicator.next(&item));
     }
     Ok(result)
@@ -167,7 +239,9 @@ mod tests {
     use super::*;
 
     fn make_data(n: usize, base: f64) -> Vec<f64> {
-        (0..n).map(|i| base + (i as f64 * 0.5) + (i as f64).sin()).collect()
+        (0..n)
+            .map(|i| base + (i as f64 * 0.5) + (i as f64).sin())
+            .collect()
     }
 
     #[test]
