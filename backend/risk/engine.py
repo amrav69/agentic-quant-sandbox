@@ -139,13 +139,29 @@ class PositionSizer:
         int
             Number of shares / contracts.
         """
-        if entry <= 0 or atr <= 0 or capital <= 0 or risk_pct <= 0:
+        # Ensure all inputs are finite numbers
+        if not (math.isfinite(capital) and math.isfinite(atr) and math.isfinite(risk_pct) and math.isfinite(entry)):
             return 0
+
+        # Safety guard for minimum ATR and standard bounds
+        if entry <= 0 or atr <= 1e-10 or capital <= 0 or risk_pct <= 0:
+            return 0
+
         dollars_at_risk = capital * risk_pct
         volatility_risk = atr / entry  # fraction of price
-        if math.isclose(volatility_risk, 0.0):
+
+        if not math.isfinite(volatility_risk) or volatility_risk <= 1e-10:
             return 0
-        return max(0, int(dollars_at_risk / (entry * volatility_risk)))
+
+        divisor = entry * volatility_risk
+        if not math.isfinite(divisor) or divisor <= 0:
+            return 0
+
+        position_size = dollars_at_risk / divisor
+        if not math.isfinite(position_size):
+            return 0
+
+        return max(0, int(position_size))
 
 
 # ---------------------------------------------------------------------------
