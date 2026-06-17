@@ -1,8 +1,12 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
+    # Windows-only Proactor pipe transport warning — not a real bug,
+    # only surfaces on Windows during GC after event loop teardown.
+    "ignore::ResourceWarning",
 ]

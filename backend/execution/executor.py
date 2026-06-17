@@ -97,8 +97,8 @@ async def execute_backtest(
 
         # ── Step 4 & 5: Subprocess + timeout ──────────────────────────────
         try:
-            result = await asyncio.wait_for(
-                _run_subprocess(tmp_path),
+            stdout_text, stderr_text, return_code = await asyncio.wait_for(
+                _run_subprocess_safe(tmp_path),
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
@@ -107,8 +107,6 @@ async def execute_backtest(
                 status=ExecutionStatus.TIMEOUT,
                 error_msg=f"Execution exceeded {timeout}s timeout and was killed.",
             )
-
-        stdout_text, stderr_text, return_code = result
 
         # ── Step 6: Parse stdout ──────────────────────────────────────────
         if return_code != 0:
@@ -170,12 +168,20 @@ async def execute_backtest(
 # ---------------------------------------------------------------------------
 
 
-async def _run_subprocess(
+async def _run_subprocess_safe(
     script_path: Path,
 ) -> tuple[str, str, int]:
     """Spawn *script_path* in a subprocess and return (stdout, stderr, returncode).
 
-    The caller is responsible for applying a timeout via ``asyncio.wait_for``.
+    This function owns the full subprocess lifecycle. If it is cancelled
+    (e.g. by ``asyncio.wait_for`` on timeout), it catches the
+    ``CancelledError``, kills the process, and awaits its termination
+    *before* re-raising — ensuring that pipe transports are closed inside
+    the active event loop.
+
+    This prevents the ``ResourceWarning: unclosed transport`` / "Event loop
+    is closed" errors on Linux that arise when a cancelled ``communicate()``
+    leaves pipe file-descriptors open past loop teardown.
     """
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -183,7 +189,28 @@ async def _run_subprocess(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout_bytes, stderr_bytes = await proc.communicate()
+    try:
+        stdout_bytes, stderr_bytes = await proc.communicate()
+    except (asyncio.CancelledError, Exception):
+        # ── Guarantee process is dead and pipes are closed ────────────────
+        # proc.kill() is a no-op if the process has already exited.
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            pass  # already exited — safe to ignore
+        # Drain remaining output and wait for OS-level cleanup so that
+        # file descriptors are released while the event loop is still open.
+        try:
+            await proc.communicate()
+        except Exception:
+            pass
+        # Always wait for the process to reap it from the OS process table.
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        raise  # re-raise CancelledError so wait_for sees the timeout
+
     return (
         stdout_bytes.decode("utf-8", errors="replace"),
         stderr_bytes.decode("utf-8", errors="replace"),
