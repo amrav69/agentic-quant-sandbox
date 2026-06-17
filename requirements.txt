@@ -13,3 +13,4 @@ httpx==0.28.1
 yfinance==1.4.0
 cachetools==7.1.4
 textual>=8.0.0
+vectorbt>=1.0.0

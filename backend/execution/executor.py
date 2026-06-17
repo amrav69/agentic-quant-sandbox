@@ -188,6 +188,11 @@ async def _run_subprocess_safe(
         str(script_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        # Explicitly inherit the parent's environment so the subprocess sees
+        # the same virtualenv / PYTHONPATH as the calling process.  Without
+        # this, some CI environments (or activated venvs) may not propagate
+        # PATH and the child Python cannot locate installed packages.
+        env=os.environ.copy(),
     )
     try:
         stdout_bytes, stderr_bytes = await proc.communicate()
