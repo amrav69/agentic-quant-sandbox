@@ -1,5 +1,12 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from backend.llm_client import get_groq_client
+import re
+
+def strip_code_fences(code: str) -> str:
+    code = code.strip()
+    code = re.sub(r'^```(?:python)?\n?', '', code)
+    code = re.sub(r'\n?```$', '', code)
+    return code.strip()
 
 class CodeGenAgent:
     def __init__(self):
@@ -58,9 +65,10 @@ Generate complete runnable Python code.'''
         ]
 
         response = await self.llm.ainvoke(messages)
+        code = strip_code_fences(response.content)
 
         return {
             'agent': 'codegen',
-            'code': response.content,
+            'code': code,
             'based_on': research_output.get('analysis')
         }

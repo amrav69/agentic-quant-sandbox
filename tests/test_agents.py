@@ -26,6 +26,23 @@ class TestCodeGenAgent:
         assert result["agent"] == "codegen"
         assert "code" in result
 
+    def test_strip_code_fences(self):
+        from backend.agents.codegen_agent import strip_code_fences
+        
+        # Test basic markdown Python code fence removal
+        input_code = "```python\nprint('hello')\n```"
+        expected = "print('hello')"
+        assert strip_code_fences(input_code) == expected
+
+        # Test code fence without python indicator
+        input_code = "```\nprint('hello')\n```"
+        expected = "print('hello')"
+        assert strip_code_fences(input_code) == expected
+
+        # Test code without fences
+        input_code = "print('hello')"
+        assert strip_code_fences(input_code) == input_code
+
 
 class TestCriticAgent:
     async def test_critique_returns_json(self, mock_llm):
