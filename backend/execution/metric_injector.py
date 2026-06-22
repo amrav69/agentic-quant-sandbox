@@ -32,29 +32,44 @@ def _extract_vbt_metrics(_pf):
     \"\"\"Pull key performance metrics from a vectorbt Portfolio object.\"\"\"
     _m = {{}}
     try:
-        _m["sharpe_ratio"] = float(_pf.sharpe_ratio())
+        _m["sharpe_ratio"] = float(_pf.sharpe_ratio(risk_free=0.0))
     except Exception:
-        _m["sharpe_ratio"] = None
+        try:
+            _m["sharpe_ratio"] = float(_pf.stats()["Sharpe Ratio"])
+        except Exception:
+            _m["sharpe_ratio"] = None
+
     try:
         _m["max_drawdown"] = float(_pf.max_drawdown())
     except Exception:
         _m["max_drawdown"] = None
+
     try:
         _m["cagr"] = float(_pf.annualized_return())
     except Exception:
-        _m["cagr"] = None
+        try:
+            _m["cagr"] = float(_pf.stats()["Ann. Return [%]"]) / 100
+        except Exception:
+            try:
+                _m["cagr"] = float(_pf.total_return())
+            except Exception:
+                _m["cagr"] = None
+
     try:
         _m["win_rate"] = float(_pf.trades.win_rate())
     except Exception:
         _m["win_rate"] = None
+
     try:
         _m["total_trades"] = int(_pf.trades.count())
     except Exception:
         _m["total_trades"] = None
+
     try:
         _m["total_return"] = float(_pf.total_return())
     except Exception:
         _m["total_return"] = None
+
     return _m
 
 try:
