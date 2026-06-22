@@ -3,7 +3,7 @@ from backend.llm_client import get_groq_client
 from backend.risk.engine import TradeValidator
 import json
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class CriticAgent:
     """
@@ -14,6 +14,7 @@ class CriticAgent:
       - Unrealistic transaction costs or slippage
       - Inadequate risk controls or missing stop-losses
       - Unrealistic returns or win rate expectations
+      - Execution failures (sanitizer rejections, timeouts, runtime errors)
     """
     def __init__(self):
         self.llm = get_groq_client()
@@ -67,18 +68,47 @@ OUTPUT REQUIREMENTS:
   ]
 }"""
 
-    async def critique(self, codegen_output: Dict[str, Any]) -> Dict[str, Any]:
+    async def critique(
+        self,
+        codegen_output: Dict[str, Any],
+        execution_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Critiques a quantitative strategy backtest and analysis.
 
         Args:
             codegen_output (dict): Contains "research_analysis" and "generated_code".
+            execution_result (dict | None): Serialized ExecutionResult from the
+                sandboxed executor.  When provided, its status and metrics are
+                folded into the prompt and used to enforce deterministic FAILs.
 
         Returns:
-            Dict[str, Any]: The structured risk review response.
+            Dict[str, Any]: The structured risk review response, extended with
+                ``execution_status`` when execution_result is supplied.
         """
         research_analysis = codegen_output.get("research_analysis", {})
         generated_code = codegen_output.get("generated_code", {})
+
+        # ── Execution-aware context block ────────────────────────────────────
+        execution_status: Optional[str] = None
+        execution_context_block = ""
+        if execution_result:
+            execution_status = execution_result.get("status")
+            sharpe = execution_result.get("sharpe_ratio")
+            max_dd = execution_result.get("max_drawdown")
+            total_trades = execution_result.get("total_trades")
+            total_return = execution_result.get("total_return")
+            error_msg = execution_result.get("error_msg")
+
+            execution_context_block = f"""
+--- EXECUTION RESULT ---
+Status          : {execution_status}
+Sharpe Ratio    : {sharpe}
+Max Drawdown    : {max_dd}
+Total Trades    : {total_trades}
+Total Return    : {total_return}
+Error Message   : {error_msg or 'None'}
+"""
 
         prompt = f"""Review the following quantitative strategy and generated python backtest code:
 
@@ -90,7 +120,7 @@ OUTPUT REQUIREMENTS:
 
 --- SYMBOL ---
 {research_analysis.get('raw_data', {}).get('symbol')}
-
+{execution_context_block}
 Perform a strict quant audit on the methodology and code. Detail every issue, suggest fixes, and decide a PASS or FAIL verdict."""
 
         try:
@@ -120,6 +150,31 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
                 if parsed_critique.get("verdict") != "FAIL":
                     parsed_critique["verdict"] = "FAIL"
 
+            # ── Deterministic FAIL for non-SUCCESS execution statuses ─────────
+            if execution_status and execution_status not in ("SUCCESS", "LOW_SAMPLE"):
+                parsed_critique["verdict"] = "FAIL"
+                parsed_critique.setdefault("issues", []).insert(0, {
+                    "severity": "fatal",
+                    "issue": (
+                        f"Backtest execution failed with status '{execution_status}'. "
+                        f"The generated code did not run successfully and cannot be approved."
+                    ),
+                })
+
+            # ── LOW_SAMPLE: flag as serious warning, don't auto-FAIL ─────────
+            if execution_status == "LOW_SAMPLE":
+                parsed_critique.setdefault("issues", []).insert(0, {
+                    "severity": "serious",
+                    "issue": (
+                        "Execution completed but total_trades < 20 — "
+                        "statistical significance is too low to trust backtest results."
+                    ),
+                })
+
+            # ── Attach execution_status to response ───────────────────────────
+            if execution_status is not None:
+                parsed_critique["execution_status"] = execution_status
+
             return parsed_critique
 
         except Exception as e:
@@ -127,7 +182,7 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
                 "agent": "CriticAgent",
                 "verdict": "FAIL",
                 "issues": [f"An error occurred during risk review execution: {str(e)}"],
-                "suggestions": ["Check client connectivity to Groq LLM API."]
+                "suggestions": ["Check client connectivity to Groq LLM API."],
             }
 
     def _run_risk_checks(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, AsyncGenerator
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ from backend.agents.research_agent import ResearchAgent
 from backend.agents.codegen_agent import CodeGenAgent
 from backend.agents.critic_agent import CriticAgent
 from backend.data.fetcher import fetch_market_data
+from backend.execution.executor import execute_backtest
 from backend.logging_config import setup_logging
 from backend.quant.indicators import calculate_indicators
 
@@ -250,10 +252,20 @@ async def critique_strategy(data: CritiqueRequest):
     try:
         research_result = await agents["research"].analyze(data.model_dump())
         generated_code = await agents["codegen"].generate(research_result)
-        critique_result = await agents["critic"].critique({
-            "research_analysis": research_result,
-            "generated_code": generated_code,
-        })
+
+        execution_result = await execute_backtest(
+            generated_code.get("code", ""),
+            timeout=int(os.getenv("EXECUTOR_TIMEOUT_SECONDS", 30)),
+        )
+        execution_result_dict = execution_result.model_dump()
+
+        critique_result = await agents["critic"].critique(
+            {
+                "research_analysis": research_result,
+                "generated_code": generated_code,
+            },
+            execution_result=execution_result_dict,
+        )
 
         elapsed = int((time.perf_counter() - start) * 1000)
         logger.info("POST /critique completed in %d ms", elapsed)
@@ -261,6 +273,7 @@ async def critique_strategy(data: CritiqueRequest):
         return {
             "research_analysis": research_result,
             "generated_code": generated_code,
+            "execution_result": execution_result_dict,
             "critique": critique_result,
         }
     except Exception:
@@ -294,11 +307,22 @@ async def analyze_stream(data: CritiqueRequest):
             generated_code = await agents["codegen"].generate(research_result)
             yield _sse_event("codegen", "done", result=generated_code)
 
+            yield _sse_event("executor", "running")
+            execution_result = await execute_backtest(
+                generated_code.get("code", ""),
+                timeout=int(os.getenv("EXECUTOR_TIMEOUT_SECONDS", 30)),
+            )
+            execution_result_dict = execution_result.model_dump()
+            yield _sse_event("executor", "done", result=execution_result_dict)
+
             yield _sse_event("critic", "running")
-            critique_result = await agents["critic"].critique({
-                "research_analysis": research_result,
-                "generated_code": generated_code,
-            })
+            critique_result = await agents["critic"].critique(
+                {
+                    "research_analysis": research_result,
+                    "generated_code": generated_code,
+                },
+                execution_result=execution_result_dict,
+            )
             yield _sse_event("critic", "done", result=critique_result)
 
         except Exception:
