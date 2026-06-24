@@ -23,6 +23,7 @@ from backend.agents.critic_agent import CriticAgent
 from backend.data.fetcher import fetch_market_data
 from backend.execution.executor import execute_backtest
 from backend.logging_config import setup_logging
+from backend.pipeline.graph import run_critique_pipeline
 from backend.quant.indicators import calculate_indicators
 
 load_dotenv()
@@ -246,39 +247,27 @@ async def generate_backtest(data: GenerateRequest):
 
 @app.post("/critique")
 async def critique_strategy(data: CritiqueRequest):
-    """Full 3-agent pipeline: research then codegen then critic."""
+    """Full LangGraph pipeline: Research → CodeGen → Execute → Critic (with retry).
+
+    On FAIL the pipeline automatically retries CodeGen once (max 2 total
+    attempts).  The response includes all per-iteration records as well as
+    backward-compatible top-level ``critique`` / ``execution_result`` keys.
+    """
     start = time.perf_counter()
-    agents = _get_agents()
     try:
-        research_result = await agents["research"].analyze(data.model_dump())
-        generated_code = await agents["codegen"].generate(research_result)
-
-        execution_result = await execute_backtest(
-            generated_code.get("code", ""),
-            timeout=int(os.getenv("EXECUTOR_TIMEOUT_SECONDS", 30)),
-        )
-        execution_result_dict = execution_result.model_dump()
-
-        critique_result = await agents["critic"].critique(
-            {
-                "research_analysis": research_result,
-                "generated_code": generated_code,
-            },
-            execution_result=execution_result_dict,
-        )
-
+        result = await run_critique_pipeline(data.model_dump())
         elapsed = int((time.perf_counter() - start) * 1000)
-        logger.info("POST /critique completed in %d ms", elapsed)
-
-        return {
-            "research_analysis": research_result,
-            "generated_code": generated_code,
-            "execution_result": execution_result_dict,
-            "critique": critique_result,
-        }
+        logger.info(
+            "POST /critique completed in %d ms — verdict=%s iterations=%d",
+            elapsed,
+            result.get("final_verdict"),
+            result.get("total_iterations"),
+        )
+        return result
     except Exception:
         logger.exception("Critique pipeline failed")
         raise HTTPException(status_code=500, detail="Pipeline execution failed")
+
 
 
 # ---------------------------------------------------------------------------
