@@ -6,6 +6,7 @@ and a full 3-agent critique pipeline with streaming support.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ from backend.data.fetcher import fetch_market_data
 from backend.execution.executor import execute_backtest
 from backend.logging_config import setup_logging
 from backend.pipeline.graph import run_critique_pipeline
+from backend.db.mongo import save_pipeline_run, get_recent_runs, get_run_by_id
 from backend.quant.indicators import calculate_indicators
 
 load_dotenv()
@@ -247,26 +249,71 @@ async def generate_backtest(data: GenerateRequest):
 
 @app.post("/critique")
 async def critique_strategy(data: CritiqueRequest):
-    """Full LangGraph pipeline: Research → CodeGen → Execute → Critic (with retry).
+    """Full LangGraph pipeline: Research -> CodeGen -> Execute -> Critic (with retry).
 
     On FAIL the pipeline automatically retries CodeGen once (max 2 total
     attempts).  The response includes all per-iteration records as well as
     backward-compatible top-level ``critique`` / ``execution_result`` keys.
+
+    Results are persisted to MongoDB asynchronously (fire-and-forget).
+    MongoDB failures are logged but never propagate to the caller.
     """
     start = time.perf_counter()
     try:
         result = await run_critique_pipeline(data.model_dump())
         elapsed = int((time.perf_counter() - start) * 1000)
         logger.info(
-            "POST /critique completed in %d ms — verdict=%s iterations=%d",
+            "POST /critique completed in %d ms -- verdict=%s iterations=%d",
             elapsed,
             result.get("final_verdict"),
             result.get("total_iterations"),
         )
+
+        # ----------------------------------------------------------------
+        # Fire-and-forget persistence — must never block the response.
+        # ----------------------------------------------------------------
+        async def _persist() -> None:
+            doc = {
+                "symbol": data.symbol,
+                "final_verdict": result.get("final_verdict"),
+                "total_iterations": result.get("total_iterations"),
+                "research_analysis": result.get("research_analysis"),
+                "iterations": result.get("iterations", []),
+                "final_execution_result": result.get("final_execution_result"),
+                "final_critique": result.get("final_critique"),
+            }
+            try:
+                await save_pipeline_run(doc)
+            except Exception:
+                logger.warning("mongo: fire-and-forget persist failed", exc_info=True)
+
+        asyncio.ensure_future(_persist())
+
         return result
     except Exception:
         logger.exception("Critique pipeline failed")
         raise HTTPException(status_code=500, detail="Pipeline execution failed")
+
+
+# ---------------------------------------------------------------------------
+# /runs -- pipeline run history
+# ---------------------------------------------------------------------------
+
+
+@app.get("/runs")
+async def list_runs():
+    """Return the 20 most-recent pipeline runs (iterations excluded)."""
+    runs = await get_recent_runs(limit=20)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/runs/{run_id}")
+async def get_run(run_id: str):
+    """Return the full stored document for *run_id*, including iterations."""
+    doc = await get_run_by_id(run_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    return doc
 
 
 

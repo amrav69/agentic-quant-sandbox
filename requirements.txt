@@ -14,3 +14,4 @@ yfinance==1.4.0
 cachetools==7.1.4
 textual>=8.0.0
 vectorbt>=1.0.0
+motor>=3.4,<4.0
