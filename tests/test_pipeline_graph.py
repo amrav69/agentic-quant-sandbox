@@ -66,8 +66,25 @@ def _critique_result(verdict: str):
     }
 
 
+def _make_mock_agents(critique_side_effect=None, critique_return=None):
+    """Return a mock agents dict that bypasses all real constructors."""
+    research = MagicMock()
+    research.analyze = AsyncMock(return_value=_research_result())
+
+    codegen = MagicMock()
+    codegen.generate = AsyncMock(return_value=_codegen_result())
+
+    critic = MagicMock()
+    if critique_side_effect is not None:
+        critic.critique = AsyncMock(side_effect=critique_side_effect)
+    else:
+        critic.critique = AsyncMock(return_value=critique_return or _critique_result("PASS"))
+
+    return {"research": research, "codegen": codegen, "critic": critic}
+
+
 # ---------------------------------------------------------------------------
-# Tests — patch at the graph node level (research/codegen/critic methods)
+# Tests
 # ---------------------------------------------------------------------------
 
 
@@ -76,23 +93,10 @@ class TestPipelinePassFirstAttempt:
 
     @pytest.mark.asyncio
     async def test_pass_first_attempt_total_iterations(self):
+        agents = _make_mock_agents(critique_return=_critique_result("PASS"))
         with (
-            patch(
-                "backend.pipeline.graph.execute_backtest",
-                return_value=_mock_execution("SUCCESS"),
-            ),
-            patch(
-                "backend.agents.research_agent.ResearchAgent.analyze",
-                new=AsyncMock(return_value=_research_result()),
-            ),
-            patch(
-                "backend.agents.codegen_agent.CodeGenAgent.generate",
-                new=AsyncMock(return_value=_codegen_result()),
-            ),
-            patch(
-                "backend.agents.critic_agent.CriticAgent.critique",
-                new=AsyncMock(return_value=_critique_result("PASS")),
-            ),
+            patch("backend.pipeline.graph.execute_backtest", return_value=_mock_execution("SUCCESS")),
+            patch("backend.pipeline.graph._make_agents", return_value=agents),
         ):
             result = await run_critique_pipeline({"symbol": "AAPL"})
 
@@ -102,32 +106,17 @@ class TestPipelinePassFirstAttempt:
 
     @pytest.mark.asyncio
     async def test_pass_first_attempt_response_shape(self):
+        agents = _make_mock_agents(critique_return=_critique_result("PASS"))
         with (
-            patch(
-                "backend.pipeline.graph.execute_backtest",
-                return_value=_mock_execution("SUCCESS"),
-            ),
-            patch(
-                "backend.agents.research_agent.ResearchAgent.analyze",
-                new=AsyncMock(return_value=_research_result()),
-            ),
-            patch(
-                "backend.agents.codegen_agent.CodeGenAgent.generate",
-                new=AsyncMock(return_value=_codegen_result()),
-            ),
-            patch(
-                "backend.agents.critic_agent.CriticAgent.critique",
-                new=AsyncMock(return_value=_critique_result("PASS")),
-            ),
+            patch("backend.pipeline.graph.execute_backtest", return_value=_mock_execution("SUCCESS")),
+            patch("backend.pipeline.graph._make_agents", return_value=agents),
         ):
             result = await run_critique_pipeline({"symbol": "AAPL"})
 
-        # Backward-compatible keys
         assert "research_analysis" in result
         assert "generated_code" in result
         assert "execution_result" in result
         assert "critique" in result
-        # New fields
         assert "iterations" in result
         assert "final_verdict" in result
         assert "final_execution_result" in result
@@ -140,26 +129,12 @@ class TestPipelineFailThenPass:
 
     @pytest.mark.asyncio
     async def test_fail_then_pass_total_iterations(self):
-        critique_mock = AsyncMock(
-            side_effect=[_critique_result("FAIL"), _critique_result("PASS")]
+        agents = _make_mock_agents(
+            critique_side_effect=[_critique_result("FAIL"), _critique_result("PASS")]
         )
         with (
-            patch(
-                "backend.pipeline.graph.execute_backtest",
-                return_value=_mock_execution("SUCCESS"),
-            ),
-            patch(
-                "backend.agents.research_agent.ResearchAgent.analyze",
-                new=AsyncMock(return_value=_research_result()),
-            ),
-            patch(
-                "backend.agents.codegen_agent.CodeGenAgent.generate",
-                new=AsyncMock(return_value=_codegen_result()),
-            ),
-            patch(
-                "backend.agents.critic_agent.CriticAgent.critique",
-                new=critique_mock,
-            ),
+            patch("backend.pipeline.graph.execute_backtest", return_value=_mock_execution("SUCCESS")),
+            patch("backend.pipeline.graph._make_agents", return_value=agents),
         ):
             result = await run_critique_pipeline({"symbol": "AAPL"})
 
@@ -169,26 +144,12 @@ class TestPipelineFailThenPass:
 
     @pytest.mark.asyncio
     async def test_fail_then_pass_iterations_stored(self):
-        critique_mock = AsyncMock(
-            side_effect=[_critique_result("FAIL"), _critique_result("PASS")]
+        agents = _make_mock_agents(
+            critique_side_effect=[_critique_result("FAIL"), _critique_result("PASS")]
         )
         with (
-            patch(
-                "backend.pipeline.graph.execute_backtest",
-                return_value=_mock_execution("SUCCESS"),
-            ),
-            patch(
-                "backend.agents.research_agent.ResearchAgent.analyze",
-                new=AsyncMock(return_value=_research_result()),
-            ),
-            patch(
-                "backend.agents.codegen_agent.CodeGenAgent.generate",
-                new=AsyncMock(return_value=_codegen_result()),
-            ),
-            patch(
-                "backend.agents.critic_agent.CriticAgent.critique",
-                new=critique_mock,
-            ),
+            patch("backend.pipeline.graph.execute_backtest", return_value=_mock_execution("SUCCESS")),
+            patch("backend.pipeline.graph._make_agents", return_value=agents),
         ):
             result = await run_critique_pipeline({"symbol": "AAPL"})
 
@@ -206,26 +167,12 @@ class TestPipelineFailBothAttempts:
 
     @pytest.mark.asyncio
     async def test_fail_both_attempts(self):
-        critique_mock = AsyncMock(
-            side_effect=[_critique_result("FAIL"), _critique_result("FAIL")]
+        agents = _make_mock_agents(
+            critique_side_effect=[_critique_result("FAIL"), _critique_result("FAIL")]
         )
         with (
-            patch(
-                "backend.pipeline.graph.execute_backtest",
-                return_value=_mock_execution("RUNTIME_ERROR"),
-            ),
-            patch(
-                "backend.agents.research_agent.ResearchAgent.analyze",
-                new=AsyncMock(return_value=_research_result()),
-            ),
-            patch(
-                "backend.agents.codegen_agent.CodeGenAgent.generate",
-                new=AsyncMock(return_value=_codegen_result()),
-            ),
-            patch(
-                "backend.agents.critic_agent.CriticAgent.critique",
-                new=critique_mock,
-            ),
+            patch("backend.pipeline.graph.execute_backtest", return_value=_mock_execution("RUNTIME_ERROR")),
+            patch("backend.pipeline.graph._make_agents", return_value=agents),
         ):
             result = await run_critique_pipeline({"symbol": "AAPL"})
 
@@ -235,24 +182,10 @@ class TestPipelineFailBothAttempts:
 
     @pytest.mark.asyncio
     async def test_no_more_than_two_iterations(self):
-        """Pipeline must never exceed 2 total iterations."""
+        agents = _make_mock_agents(critique_return=_critique_result("FAIL"))
         with (
-            patch(
-                "backend.pipeline.graph.execute_backtest",
-                return_value=_mock_execution("RUNTIME_ERROR"),
-            ),
-            patch(
-                "backend.agents.research_agent.ResearchAgent.analyze",
-                new=AsyncMock(return_value=_research_result()),
-            ),
-            patch(
-                "backend.agents.codegen_agent.CodeGenAgent.generate",
-                new=AsyncMock(return_value=_codegen_result()),
-            ),
-            patch(
-                "backend.agents.critic_agent.CriticAgent.critique",
-                new=AsyncMock(return_value=_critique_result("FAIL")),
-            ),
+            patch("backend.pipeline.graph.execute_backtest", return_value=_mock_execution("RUNTIME_ERROR")),
+            patch("backend.pipeline.graph._make_agents", return_value=agents),
         ):
             result = await run_critique_pipeline({"symbol": "AAPL"})
 
