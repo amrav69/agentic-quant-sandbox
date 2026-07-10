@@ -37,14 +37,19 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
                     │  vectorbt backtest  │
                     └────────┬────────────┘
                              │
-                    ┌────────▼────────────┐
+                    ┌─────────────────────┐
                     │   Critic Agent       │
                     │  Structural audit   │
                     └────────┬────────────┘
                              │
                     ┌────────▼────────────┐
-                    │   Verdict + Issues   │
-                    │  PASS / FAIL + fixes │
+                    │  LangGraph Loop      │
+                    │  FAIL → retry ≤2x    │
+                    └────────┬────────────┘
+                             │
+                    ┌────────▼────────────┐
+                    │  MongoDB + Redis     │
+                    │  Persist + Cache     │
                     └─────────────────────┘
 
 ┌──────────────────────────────────────────┐
@@ -82,6 +87,10 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
 | **Rust TUI** | Ratatui + crossterm + tokio + reqwest (`rust/aqs-tui`) |
 | **Rust Core** | quant-core — SMA, EMA, RSI, ATR in safe Rust (`rust/quant-core`) |
 | **Testing** | pytest, pytest-asyncio, hypothesis (property tests), criterion (Rust benchmarks) |
+| **Orchestration** | LangGraph StateGraph — feedback loop with max 2 iterations |
+| **Persistence** | MongoDB (motor) — all pipeline runs stored |
+| **Caching** | Redis — Research Agent output cached 300s |
+| **Containerisation** | Docker + docker-compose (API + MongoDB + Redis) |
 
 ---
 
@@ -135,9 +144,11 @@ Key endpoints:
 
 ```
 GET  /health
-GET  /analyze/{symbol}        # full autonomous analysis
-POST /critique                # research → codegen → critic pipeline
-POST /analyze/stream          # SSE streaming pipeline
+POST /analyze                 # Research Agent only
+POST /generate                # Research + CodeGen
+POST /critique                # Full pipeline with LangGraph feedback loop
+GET  /runs                    # Last 20 pipeline runs
+GET  /runs/{id}               # Single run by ID
 ```
 
 ### Run TUI
@@ -162,11 +173,16 @@ agentic-quant-sandbox/
 │   ├── main.py                 # FastAPI app, route definitions
 │   ├── llm_client.py           # Groq client initialization
 │   ├── cache.py                # TTL cache decorator
+│   ├── redis_cache.py          # Async Redis cache (TTL 300s)
 │   ├── logging_config.py       # Structured logging setup
 │   ├── agents/
 │   │   ├── research_agent.py   # Market regime analysis + indicator auto-fetch
 │   │   ├── codegen_agent.py    # vectorbt backtest generation
 │   │   └── critic_agent.py     # Strategy structural audit
+│   ├── pipeline/
+│   │   └── graph.py            # LangGraph feedback loop
+│   ├── db/
+│   │   └── mongo.py            # MongoDB persistence (motor)
 │   ├── data/
 │   │   └── fetcher.py          # yfinance data fetch with TTL caching
 │   ├── quant/
