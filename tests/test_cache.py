@@ -1,8 +1,12 @@
-"""Tests for the TTL caching layer."""
+"""Tests for the TTL caching layer and async Redis cache."""
 
 from __future__ import annotations
 
+import json
 import time
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from backend.cache import ttl_cache
 
@@ -103,15 +107,6 @@ class TestTtlCache:
         assert fetch(1, b=2) == 3
         assert call_count == 1
 
-
-# ---------------------------------------------------------------------------
-# Async Redis cache tests (backend/redis_cache.py)
-# ---------------------------------------------------------------------------
-
-import json
-from unittest.mock import AsyncMock, patch
-
-import pytest
 
 
 def _research_result(symbol: str = "AAPL") -> dict:
