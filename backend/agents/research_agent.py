@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from backend.llm_client import get_groq_client
+from backend.redis_cache import get_cached, set_cached
 
 class ResearchAgent:
     def __init__(self):
@@ -59,6 +60,13 @@ BEHAVIOR RULES:
         # Ensure market_data is a dictionary and we have a copy to modify if needed
         market_data = dict(market_data)
         symbol = market_data.get('symbol')
+
+        # Redis cache check (silent-fail)
+        cache_key = f"research:{symbol}"
+        cached = await get_cached(cache_key)
+        if cached is not None:
+            logger.info("ResearchAgent: cache hit for %s", symbol)
+            return cached
 
         if symbol:
             symbol_upper = symbol.upper()
@@ -182,8 +190,10 @@ Output your analysis as valid JSON only.'''
 
         response = await self.llm.ainvoke(messages)
 
-        return {
+        result = {
             'agent': 'research',
             'analysis': response.content,
             'raw_data': market_data
         }
+        await set_cached(cache_key, result, ttl_seconds=300)
+        return result
