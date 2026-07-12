@@ -79,9 +79,8 @@ pub extern "C" fn calc_rsi(
 
 #[cfg(feature = "python")]
 pub mod python {
-    use crate::calculate_rsi;
+    use crate::{calculate_ema, calculate_macd, calculate_rsi};
     use pyo3::prelude::*;
-    use pyo3::PyResult;
 
     #[pyfunction]
     pub fn calculate_rsi_py(prices: Vec<f64>, period: usize) -> PyResult<Vec<f64>> {
@@ -89,9 +88,29 @@ pub mod python {
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
+    #[pyfunction]
+    pub fn calculate_ema_py(prices: Vec<f64>, period: usize) -> PyResult<Vec<f64>> {
+        calculate_ema(&prices, period)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    #[pyfunction]
+    pub fn calculate_macd_py(
+        prices: Vec<f64>,
+        fast: usize,
+        slow: usize,
+        signal: usize,
+    ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+        let out = calculate_macd(&prices, fast, slow, signal)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok((out.macd_line, out.signal_line, out.histogram))
+    }
+
     #[pymodule]
-    fn quant_core(_py: Python, m: &PyModule) -> PyResult<()> {
+    fn quant_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(calculate_rsi_py, m)?)?;
+        m.add_function(wrap_pyfunction!(calculate_ema_py, m)?)?;
+        m.add_function(wrap_pyfunction!(calculate_macd_py, m)?)?;
         Ok(())
     }
 }

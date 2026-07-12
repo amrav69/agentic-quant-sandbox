@@ -52,18 +52,26 @@ def calculate_indicators(symbol: str = "BTC-USD") -> Dict[str, Any]:
         # Get the latest closing price of the asset
         current_price = float(df["Close"].iloc[-1])
         
-        # --- Calculate Indicators using pandas-ta ---
+        # --- Calculate Indicators ---
+        # RSI, EMA, MACD via quant_bridge (Rust-first, pandas-ta fallback)
+        from backend.quant_bridge import calculate_rsi, calculate_ema, calculate_macd
+
         # 1. RSI (14)
-        rsi_series = df.ta.rsi(length=14)
-        
-        # 2. MACD (default: fast=12, slow=26, signal=9)
-        macd_df = df.ta.macd(fast=12, slow=26, signal=9)
-        
+        rsi_series = calculate_rsi(df["Close"], period=14)
+
+        # 2. MACD (fast=12, slow=26, signal=9)
+        macd_line_series, macd_signal_series, _ = calculate_macd(
+            df["Close"], fast=12, slow=26, signal=9
+        )
+        # Wrap MACD results into a compatible DataFrame for the extraction code below
+        macd_df = macd_line_series.rename("MACD_12_26_9").to_frame()
+        macd_df["MACDs_12_26_9"] = macd_signal_series
+
         # 3. EMA 20 & EMA 50
-        ema20_series = df.ta.ema(length=20)
-        ema50_series = df.ta.ema(length=50)
-        
-        # 4. ATR (14)
+        ema20_series = calculate_ema(df["Close"], period=20)
+        ema50_series = calculate_ema(df["Close"], period=50)
+
+        # 4. ATR (14) — keep pandas-ta (no Rust ATR exposed yet)
         atr_series = df.ta.atr(length=14)
         
         # --- Helper function for robust float extraction ---
