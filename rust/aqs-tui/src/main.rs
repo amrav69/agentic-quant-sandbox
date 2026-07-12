@@ -104,7 +104,9 @@ enum AppMessage {
     StreamEvent(StreamStage, String),
     PipelineError(String),
     ClockTick,
+    HistoryResult(Vec<HistoryEntry>),
 }
+
 
 #[derive(Debug, Clone)]
 enum StreamStage {
@@ -174,7 +176,9 @@ struct CritiqueApiResponse {
     research_analysis: Option<serde_json::Value>,
     generated_code: Option<GeneratedCode>,
     critique: Option<CritiqueResult>,
+    total_iterations: Option<i32>,
 }
+
 
 /// backend returns code wrapped in markdown fences (```python ... ```)
 #[allow(dead_code)]
@@ -224,7 +228,9 @@ struct CritiqueResult {
     #[serde(default)]
     suggestions: Option<Vec<serde_json::Value>>,
     confidence: Option<f64>,
+    total_iterations: Option<i32>,
 }
+
 
 impl CritiqueResult {
     fn issue_strings(&self) -> Vec<String> {
@@ -282,8 +288,10 @@ struct HistoryEntry {
     regime: String,
     verdict: String,
     confidence: String,
+    iterations: String,
     timestamp: String,
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AGENT STATUS
@@ -473,8 +481,11 @@ impl App {
         if self.active_view == View::History {
             let len = self.history.len();
             self.history_scroll_state = self.history_scroll_state.content_length(len);
+            let tx = self.msg_tx.clone();
+            tokio::spawn(fetch_history(tx));
         }
     }
+
 
     // ── History navigation ─────────────────────────────────────────────────
 
@@ -504,6 +515,13 @@ impl App {
                 self.clock = Local::now().format("%Y-%m-%d  %H:%M:%S").to_string();
             }
 
+            AppMessage::HistoryResult(entries) => {
+                self.history = entries;
+                let len = self.history.len();
+                self.history_scroll_state = self.history_scroll_state.content_length(len);
+            }
+
+
             AppMessage::HealthCheckResult(ok) => {
                 self.backend_status = if ok { BackendStatus::Online } else { BackendStatus::Offline };
                 self.last_health_check = Instant::now();
@@ -528,12 +546,43 @@ impl App {
 
             AppMessage::CriticResult(result) => {
                 let verdict = result.verdict.clone().unwrap_or_default();
-                let confidence = result.confidence.map(|c| format!("{:.0}%", c * 100.0))
-                    .unwrap_or_else(|| "N/A".to_string());
-                self.critic_output = result;
+                self.critic_output = result.clone();
                 self.loading_state = LoadingState::Complete;
                 self.agents[2].state = AgentState::Done;
                 self.agents[2].last_activity = Local::now().format("%H:%M:%S").to_string();
+
+                let research_conf = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&self.research_output) {
+                    if let Some(conf) = v.get("confidence") {
+                        let conf_str = match conf {
+                            serde_json::Value::Number(n) => {
+                                if let Some(f) = n.as_f64() {
+                                    if f <= 1.0 {
+                                        format!("{:.0}", f * 100.0)
+                                    } else {
+                                        format!("{:.0}", f)
+                                    }
+                                } else {
+                                    n.to_string()
+                                }
+                            }
+                            serde_json::Value::String(s) => s.replace('%', "").trim().to_string(),
+                            other => other.to_string(),
+                        };
+                        if !conf_str.is_empty() && conf_str != "null" {
+                            conf_str
+                        } else {
+                            "-".to_string()
+                        }
+                    } else {
+                        "-".to_string()
+                    }
+                } else {
+                    "-".to_string()
+                };
+
+                let iterations = result.total_iterations
+                    .map(|i| i.to_string())
+                    .unwrap_or_else(|| "1".to_string());
 
                 // Add to history
                 let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -541,7 +590,8 @@ impl App {
                     symbol: self.current_symbol.clone(),
                     regime: extract_regime(&self.research_output),
                     verdict: verdict.clone(),
-                    confidence: confidence.clone(),
+                    confidence: research_conf.clone(),
+                    iterations: iterations.clone(),
                     timestamp: ts.clone(),
                 };
                 self.history.push(entry);
@@ -550,7 +600,7 @@ impl App {
                 let color_tag = if verdict == "PASS" { "✓" } else { "✗" };
                 self.feed_log.push(format!(
                     "[{}]  {:8}  {}  conf: {}",
-                    ts, self.current_symbol, color_tag, confidence
+                    ts, self.current_symbol, color_tag, research_conf
                 ));
                 if self.feed_log.len() > 100 {
                     self.feed_log.remove(0);
@@ -563,6 +613,7 @@ impl App {
                     }
                 }
             }
+
 
             AppMessage::StreamEvent(stage, data) => {
                 match stage {
@@ -649,6 +700,15 @@ impl App {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn extract_regime(research: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(research) {
+        if let Some(obj) = v.as_object() {
+            if let Some(r) = obj.get("regime_label").or_else(|| obj.get("regime")) {
+                if let Some(s) = r.as_str() {
+                    return s.to_string();
+                }
+            }
+        }
+    }
     // Simple heuristic: look for known keywords
     for word in &["Bullish", "Bearish", "Ranging", "Neutral"] {
         if research.contains(word) {
@@ -657,6 +717,236 @@ fn extract_regime(research: &str) -> String {
     }
     "Unknown".to_string()
 }
+
+#[derive(Debug, Deserialize)]
+struct RunsApiResponse {
+    runs: Vec<RunDoc>,
+    _count: usize,
+}
+
+
+#[derive(Debug, Deserialize)]
+struct RunDoc {
+    symbol: Option<String>,
+    final_verdict: Option<String>,
+    total_iterations: Option<i32>,
+    research_analysis: Option<serde_json::Value>,
+    timestamp: Option<String>,
+}
+
+fn extract_confidence_from_analysis(analysis_val: &serde_json::Value) -> String {
+    if let Some(analysis_str) = analysis_val.get("analysis").and_then(|v| v.as_str()) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(analysis_str) {
+            if let Some(conf) = v.get("confidence") {
+                let conf_str = match conf {
+                    serde_json::Value::Number(n) => {
+                        if let Some(f) = n.as_f64() {
+                            if f <= 1.0 {
+                                format!("{:.0}", f * 100.0)
+                            } else {
+                                format!("{:.0}", f)
+                            }
+                        } else {
+                            n.to_string()
+                        }
+                    }
+                    serde_json::Value::String(s) => s.replace('%', "").trim().to_string(),
+                    other => other.to_string(),
+                };
+                if !conf_str.is_empty() && conf_str != "null" {
+                    return conf_str;
+                }
+            }
+        }
+    }
+    "-".to_string()
+}
+
+fn parse_research_json(raw: &str) -> Option<Vec<Line<'static>>> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let obj = v.as_object()?;
+    
+    let regime_label = obj.get("regime_label")
+        .or_else(|| obj.get("regime"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("N/A")
+        .to_string();
+
+    let mut rsi_val = "N/A".to_string();
+    if let Some(indicator_val) = obj.get("indicator_reading") {
+        if let Some(ind_obj) = indicator_val.as_object() {
+            if let Some(r) = ind_obj.get("rsi").or_else(|| ind_obj.get("RSI")) {
+                if let Some(num) = r.as_f64() {
+                    rsi_val = format!("{:.1}", num);
+                } else if let Some(s) = r.as_str() {
+                    rsi_val = s.to_string();
+                }
+            }
+        } else if let Some(s) = indicator_val.as_str() {
+            let s_lower = s.to_lowercase();
+            if let Some(rsi_idx) = s_lower.find("rsi") {
+                let after = &s[rsi_idx..];
+                let mut num_str = String::new();
+                let mut found_digit = false;
+                for c in after.chars() {
+                    if c.is_ascii_digit() || c == '.' {
+                        num_str.push(c);
+                        found_digit = true;
+                    } else if found_digit {
+                        break;
+                    }
+                }
+                if !num_str.is_empty() {
+                    rsi_val = num_str;
+                } else {
+                    let mut num_str = String::new();
+                    let mut found_digit = false;
+                    for c in s.chars() {
+                        if c.is_ascii_digit() || c == '.' {
+                            num_str.push(c);
+                            found_digit = true;
+                        } else if found_digit {
+                            break;
+                        }
+                    }
+                    if !num_str.is_empty() {
+                        rsi_val = num_str;
+                    } else {
+                        rsi_val = s.to_string();
+                    }
+                }
+            } else {
+                let mut num_str = String::new();
+                let mut found_digit = false;
+                for c in s.chars() {
+                    if c.is_ascii_digit() || c == '.' {
+                        num_str.push(c);
+                        found_digit = true;
+                    } else if found_digit {
+                        break;
+                    }
+                }
+                if !num_str.is_empty() {
+                    rsi_val = num_str;
+                } else {
+                    rsi_val = s.to_string();
+                }
+            }
+        }
+    }
+
+    let trade_hypothesis = obj.get("trade_hypothesis")
+        .and_then(|v| v.as_str())
+        .unwrap_or("N/A")
+        .to_string();
+
+    let entry_condition = obj.get("entry_condition")
+        .and_then(|v| v.as_str())
+        .unwrap_or("N/A")
+        .to_string();
+
+    let stop_loss_level = obj.get("stop_loss_level")
+        .and_then(|v| v.as_str())
+        .unwrap_or("N/A")
+        .to_string();
+
+    let confidence = obj.get("confidence")
+        .map(|v| match v {
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    if f <= 1.0 {
+                        format!("{:.0}", f * 100.0)
+                    } else {
+                        format!("{:.0}", f)
+                    }
+                } else {
+                    n.to_string()
+                }
+            }
+            serde_json::Value::String(s) => s.replace('%', "").trim().to_string(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "N/A".to_string());
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  Regime:     ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(regime_label, Style::default().fg(C_TEXT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  RSI:        ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(rsi_val, Style::default().fg(C_TEXT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Hypothesis: ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(trade_hypothesis, Style::default().fg(C_TEXT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Entry:      ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(entry_condition, Style::default().fg(C_TEXT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Stop:       ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(stop_loss_level, Style::default().fg(C_TEXT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Confidence: ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{}%", confidence), Style::default().fg(C_TEXT)),
+    ]));
+
+    Some(lines)
+}
+
+async fn fetch_history(tx: mpsc::UnboundedSender<AppMessage>) {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    let url = format!("{}/runs", BACKEND_URL);
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            if let Ok(api_resp) = resp.json::<RunsApiResponse>().await {
+                let mut entries = Vec::new();
+                for doc in api_resp.runs {
+                    let symbol = doc.symbol.clone().unwrap_or_else(|| "Unknown".to_string());
+                    let verdict = doc.final_verdict.clone().unwrap_or_else(|| "-".to_string());
+                    let iterations = doc.total_iterations.map(|i| i.to_string()).unwrap_or_else(|| "1".to_string());
+                    
+                    let timestamp = doc.timestamp.clone().map(|ts| {
+                        if ts.len() >= 19 {
+                            ts[..19].replace('T', " ")
+                        } else {
+                            ts
+                        }
+                    }).unwrap_or_else(|| "-".to_string());
+
+                    let analysis_val = doc.research_analysis.as_ref().unwrap_or(&serde_json::Value::Null);
+                    let regime = if let Some(analysis_str) = analysis_val.get("analysis").and_then(|v| v.as_str()) {
+                        extract_regime(analysis_str)
+                    } else {
+                        "Unknown".to_string()
+                    };
+
+                    let confidence = extract_confidence_from_analysis(analysis_val);
+
+                    entries.push(HistoryEntry {
+                        symbol,
+                        regime,
+                        verdict,
+                        confidence,
+                        iterations,
+                        timestamp,
+                    });
+                }
+                let _ = tx.send(AppMessage::HistoryResult(entries));
+            }
+        }
+        Err(_) => {}
+    }
+}
+
 
 fn spinner_frame(instant: &Instant) -> &'static str {
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -809,30 +1099,9 @@ async fn run_http_pipeline(
                 return;
             }
             Ok(data) => {
-                // ai_analysis is a JSON-escaped string — display it as-is
-                // (try to pretty-print if it's valid JSON, else show raw)
                 let raw_analysis = data.ai_analysis.unwrap_or_default();
-                let analysis_display = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw_analysis) {
-                    // Format the nested JSON object into readable key: value lines
-                    v.as_object()
-                        .map(|m| {
-                            m.iter()
-                                .filter(|(k, _)| k.as_str() != "agent")
-                                .map(|(k, v)| {
-                                    let val = match v {
-                                        serde_json::Value::String(s) => s.clone(),
-                                        other => other.to_string(),
-                                    };
-                                    format!("{}: {}", k, val)
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        })
-                        .unwrap_or(raw_analysis.clone())
-                } else {
-                    raw_analysis.clone()
-                };
-                let _ = tx.send(AppMessage::ResearchResult(analysis_display));
+                let _ = tx.send(AppMessage::ResearchResult(raw_analysis));
+
 
                 // Extract indicators using the typed LiveIndicators struct
                 let ind = data.live_indicators.as_ref();
@@ -878,9 +1147,10 @@ async fn run_http_pipeline(
                                 let code = code_obj.clean_code();
                                 let _ = tx.send(AppMessage::CodeGenResult(code));
                             }
-                            if let Some(critique) = cr_data.critique {
-                                let _ = tx.send(AppMessage::CriticResult(critique));
-                            }
+                             if let Some(mut critique) = cr_data.critique {
+                                 critique.total_iterations = cr_data.total_iterations;
+                                 let _ = tx.send(AppMessage::CriticResult(critique));
+                             }
                         }
                     },
                 }
@@ -1352,16 +1622,21 @@ fn render_research_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area:
             _ => vec![Line::from(Span::styled("  No data.", Style::default().fg(C_TEXT_MUTED)))],
         }
     } else {
-        app.research_output
-            .lines()
-            .map(|l| {
-                Line::from(Span::styled(
-                    format!("  {}", l),
-                    Style::default().fg(C_TEXT),
-                ))
-            })
-            .collect()
+        if let Some(lines) = parse_research_json(&app.research_output) {
+            lines
+        } else {
+            app.research_output
+                .lines()
+                .map(|l| {
+                    Line::from(Span::styled(
+                        format!("  {}", l),
+                        Style::default().fg(C_TEXT),
+                    ))
+                })
+                .collect()
+        }
     };
+
 
     let panel = Paragraph::new(content)
         .block(
@@ -1595,6 +1870,7 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
                 Cell::from(entry.regime.clone()).style(Style::default().fg(C_TEXT_DIM)),
                 Cell::from(verdict_icon).style(verdict_style),
                 Cell::from(entry.confidence.clone()).style(Style::default().fg(C_TEXT_DIM)),
+                Cell::from(entry.iterations.clone()).style(Style::default().fg(C_TEXT_DIM)),
                 Cell::from(entry.timestamp.clone()).style(Style::default().fg(C_TEXT_MUTED)),
             ])
             .height(1)
@@ -1610,7 +1886,7 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
 
     let selected_style = Style::default().bg(C_HIGHLIGHT).fg(C_PRIMARY).add_modifier(Modifier::BOLD);
 
-    let header_cells = ["SYMBOL", "REGIME", "VERDICT", "CONFIDENCE", "TIMESTAMP"]
+    let header_cells = ["SYMBOL", "REGIME", "VERDICT", "CONFIDENCE", "ITERATIONS", "TIMESTAMP"]
         .iter()
         .map(|h| {
             Cell::from(*h).style(
@@ -1628,6 +1904,7 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
         Constraint::Length(12),
         Constraint::Length(14),
         Constraint::Length(10),
+        Constraint::Length(12),
         Constraint::Length(12),
         Constraint::Min(20),
     ])
@@ -1658,7 +1935,32 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
         };
         f.render_widget(msg, inner);
     }
+
+    if app.history.len() < 10 {
+        let placeholder_y = area.y + 2 + app.history.len() as u16;
+        if placeholder_y < area.y + area.height - 1 {
+            let placeholder_area = Rect {
+                x: area.x + 1,
+                y: placeholder_y,
+                width: area.width.saturating_sub(2),
+                height: 1,
+            };
+            let text_len = 17; // " no more records "
+            let width = placeholder_area.width as usize;
+            let dash_count = width.saturating_sub(text_len) / 2;
+            let dashes = "─".repeat(dash_count);
+            let placeholder_str = format!("{} no more records {}", dashes, dashes);
+
+            let placeholder = Paragraph::new(Line::from(Span::styled(
+                placeholder_str,
+                Style::default().fg(C_TEXT_MUTED),
+            )))
+            .alignment(Alignment::Center);
+            f.render_widget(placeholder, placeholder_area);
+        }
+    }
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT HANDLING
@@ -1692,9 +1994,12 @@ fn handle_key_event(app: &mut App, key: event::KeyEvent) {
                     let ok = check_health().await;
                     let _ = tx.send(AppMessage::HealthCheckResult(ok));
                 });
+                let tx2 = app.msg_tx.clone();
+                tokio::spawn(fetch_history(tx2));
                 return;
             }
         }
+
         _ => {}
     }
 
@@ -1787,9 +2092,13 @@ async fn main() -> Result<()> {
         });
     }
 
+    // Load initial history
+    tokio::spawn(fetch_history(msg_tx.clone()));
+
     let spinner_tick = Instant::now();
     let tick_rate = Duration::from_millis(TICK_RATE_MS);
     let mut last_tick = Instant::now();
+
 
     // Main render loop
     loop {
