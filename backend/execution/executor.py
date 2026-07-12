@@ -20,6 +20,9 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+import platform
+import subprocess as _subprocess
+
 
 from backend.execution.metric_injector import METRICS_SENTINEL, inject_metrics_extraction
 from backend.execution.models import ExecutionResult, ExecutionStatus
@@ -111,10 +114,14 @@ async def execute_backtest(
         # ── Step 6: Parse stdout ──────────────────────────────────────────
         if return_code != 0:
             logger.warning("execute_backtest: subprocess exited %d", return_code)
+            err_msg = _trim(stderr_text or stdout_text)
+            if not err_msg:
+                err_msg = f"Subprocess exited with non-zero return code: {return_code}"
             return ExecutionResult(
                 status=ExecutionStatus.RUNTIME_ERROR,
-                error_msg=_trim(stderr_text or stdout_text),
+                error_msg=err_msg,
             )
+
 
         metrics = _parse_metrics(stdout_text)
         if metrics is None:
@@ -148,10 +155,14 @@ async def execute_backtest(
 
     except Exception as exc:
         logger.exception("execute_backtest: unexpected exception")
+        import traceback
+        tb = traceback.format_exc()
+        msg = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
         return ExecutionResult(
             status=ExecutionStatus.RUNTIME_ERROR,
-            error_msg=str(exc),
+            error_msg=f"{msg}\n\n{tb}",
         )
+
 
     finally:
         # ── Step 8: Always clean up temp file ─────────────────────────────
@@ -168,59 +179,53 @@ async def execute_backtest(
 # ---------------------------------------------------------------------------
 
 
-async def _run_subprocess_safe(
-    script_path: Path,
-) -> tuple[str, str, int]:
-    """Spawn *script_path* in a subprocess and return (stdout, stderr, returncode).
+async def _run_subprocess_safe(script_path: Path) -> tuple[str, str, int]:
+    if platform.system() == "Windows":
+        def _run_sync() -> tuple[str, str, int]:
+            result = _subprocess.run(
+                [sys.executable, str(script_path)],
+                capture_output=True,
+                text=True,
+                env=os.environ.copy(),
+            )
+            return result.stdout, result.stderr, result.returncode
 
-    This function owns the full subprocess lifecycle. If it is cancelled
-    (e.g. by ``asyncio.wait_for`` on timeout), it catches the
-    ``CancelledError``, kills the process, and awaits its termination
-    *before* re-raising — ensuring that pipe transports are closed inside
-    the active event loop.
+        return await asyncio.to_thread(_run_sync)
 
-    This prevents the ``ResourceWarning: unclosed transport`` / "Event loop
-    is closed" errors on Linux that arise when a cancelled ``communicate()``
-    leaves pipe file-descriptors open past loop teardown.
-    """
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         str(script_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        # Explicitly inherit the parent's environment so the subprocess sees
-        # the same virtualenv / PYTHONPATH as the calling process.  Without
-        # this, some CI environments (or activated venvs) may not propagate
-        # PATH and the child Python cannot locate installed packages.
         env=os.environ.copy(),
     )
+
     try:
         stdout_bytes, stderr_bytes = await proc.communicate()
     except (asyncio.CancelledError, Exception):
-        # ── Guarantee process is dead and pipes are closed ────────────────
-        # proc.kill() is a no-op if the process has already exited.
         try:
             proc.kill()
         except (ProcessLookupError, OSError):
-            pass  # already exited — safe to ignore
-        # Drain remaining output and wait for OS-level cleanup so that
-        # file descriptors are released while the event loop is still open.
+            pass
+
         try:
             await proc.communicate()
         except Exception:
             pass
-        # Always wait for the process to reap it from the OS process table.
+
         try:
             await proc.wait()
         except Exception:
             pass
-        raise  # re-raise CancelledError so wait_for sees the timeout
+
+        raise
 
     return (
         stdout_bytes.decode("utf-8", errors="replace"),
         stderr_bytes.decode("utf-8", errors="replace"),
         proc.returncode or 0,
     )
+
 
 
 def _parse_metrics(stdout: str) -> dict | None:
