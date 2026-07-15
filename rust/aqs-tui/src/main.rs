@@ -10,7 +10,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures_util::StreamExt;
+
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -95,6 +95,7 @@ enum BackendStatus {
 // MESSAGES — Async channel messages from background tasks → UI
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum AppMessage {
     HealthCheckResult(bool),
@@ -108,6 +109,7 @@ enum AppMessage {
 }
 
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum StreamStage {
     Research,
@@ -115,6 +117,7 @@ enum StreamStage {
     Critic,
     Error,
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API RESPONSE TYPES
@@ -261,13 +264,6 @@ impl CritiqueResult {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct SseEvent {
-    stage: Option<String>,
-    status: Option<String>,
-    result: Option<serde_json::Value>,
-    message: Option<String>,
-}
 
 #[derive(Debug, Serialize)]
 struct CritiqueRequest {
@@ -997,89 +993,47 @@ async fn run_sse_pipeline(
     };
 
     let resp = client
-        .post(format!("{}/analyze/stream", BACKEND_URL))
+        .post(format!("{}/critique", BACKEND_URL))
         .json(&payload)
         .send()
         .await
-        .context("SSE connect failed")?;
+        .context("Critique request failed")?;
 
     if !resp.status().is_success() {
-        anyhow::bail!("SSE non-200: {}", resp.status());
+        anyhow::bail!("Critique response non-200: {}", resp.status());
     }
 
-    let mut stream = resp.bytes_stream();
-    let mut buffer = String::new();
+    let cr_data = resp
+        .json::<CritiqueApiResponse>()
+        .await
+        .context("Critique parse failed")?;
 
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.context("SSE read failed")?;
-        buffer.push_str(&String::from_utf8_lossy(&bytes));
+    // Extract research analysis
+    if let Some(research_obj) = cr_data.research_analysis {
+        let analysis_str = research_obj
+            .get("analysis")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = tx.send(AppMessage::ResearchResult(analysis_str));
+    }
 
-        // Drain complete SSE events (terminated by \n\n)
-        while let Some(pos) = buffer.find("\n\n") {
-            let event_text = buffer[..pos].to_string();
-            buffer.drain(..pos + 2);
+    // Extract generated code
+    if let Some(code_obj) = cr_data.generated_code {
+        let code = code_obj.clean_code();
+        let _ = tx.send(AppMessage::CodeGenResult(code));
+    }
 
-            // SSE lines start with "data: "
-            for line in event_text.lines() {
-                let data = line.strip_prefix("data: ").unwrap_or(line);
-                if data.is_empty() {
-                    continue;
-                }
-                if let Ok(evt) = serde_json::from_str::<SseEvent>(data) {
-                    handle_sse_event(evt, tx);
-                }
-            }
-        }
+    // Extract critique
+    if let Some(mut critique) = cr_data.critique {
+        critique.total_iterations = cr_data.total_iterations;
+        let _ = tx.send(AppMessage::CriticResult(critique));
     }
 
     Ok(())
 }
 
-fn handle_sse_event(evt: SseEvent, tx: &mpsc::UnboundedSender<AppMessage>) {
-    let stage_str = evt.stage.as_deref().unwrap_or("");
-    let status = evt.status.as_deref().unwrap_or("");
 
-    if stage_str == "error" {
-        let msg = evt.message.unwrap_or_else(|| "Unknown SSE error".to_string());
-        let _ = tx.send(AppMessage::StreamEvent(StreamStage::Error, msg));
-        return;
-    }
-
-    if status == "running" {
-        let stage = match stage_str {
-            "research" => StreamStage::Research,
-            "codegen" => StreamStage::CodeGen,
-            "critic" => StreamStage::Critic,
-            _ => return,
-        };
-        let _ = tx.send(AppMessage::StreamEvent(stage, String::new()));
-    } else if status == "done" {
-        if let Some(result) = evt.result {
-            match stage_str {
-                "research" => {
-                    let text = result.get("analysis")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let _ = tx.send(AppMessage::StreamEvent(StreamStage::Research, text));
-                }
-                "codegen" => {
-                    let code = result.get("code")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let _ = tx.send(AppMessage::StreamEvent(StreamStage::CodeGen, code));
-                }
-                "critic" => {
-                    if let Ok(cr) = serde_json::from_value::<CritiqueResult>(result) {
-                        let _ = tx.send(AppMessage::CriticResult(cr));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
 
 async fn run_http_pipeline(
     client: &reqwest::Client,
