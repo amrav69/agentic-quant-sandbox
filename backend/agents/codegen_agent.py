@@ -15,147 +15,111 @@ class CodeGenAgent:
 
 You receive a structured trade hypothesis and your sole job is to convert it into a deterministic, executable vectorbt backtest in Python.
 
-===============================================================
-VALID vectorbt 1.0.0 API — USE ONLY THESE PATTERNS
-===============================================================
+VECTORBT 1.0.0 SYNTAX RULES — follow exactly:
 
-STEP 1 — DATA DOWNLOAD:
+CORRECT indicator usage:
+    ema20 = data['Close'].ewm(span=20, adjust=False).mean()
+    ema50 = data['Close'].ewm(span=50, adjust=False).mean()
+    delta = data['Close'].diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = -delta.clip(upper=0).rolling(14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    high_low = data['High'] - data['Low']
+    high_close = (data['High'] - data['Close'].shift()).abs()
+    low_close = (data['Low'] - data['Close'].shift()).abs()
+    atr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
 
-    import yfinance as yf
-    import vectorbt as vbt
-    import pandas as pd
-    import numpy as np
-
-    data = yf.download("AAPL", period="2y", auto_adjust=True)
-    close = data["Close"].squeeze()
-    high  = data["High"].squeeze()
-    low   = data["Low"].squeeze()
-
-STEP 2 — INDICATORS (pure pandas/numpy — never vbt.ta.*):
-
-    # EMA
-    ema20 = close.ewm(span=20, adjust=False).mean()
-    ema50 = close.ewm(span=50, adjust=False).mean()
-
-    # SMA
-    sma20 = close.rolling(20).mean()
-
-    # RSI (14-period)
-    delta = close.diff()
-    gain  = delta.clip(lower=0).rolling(14).mean()
-    loss  = (-delta.clip(upper=0)).rolling(14).mean()
-    rs    = gain / loss.replace(0, np.nan)
-    rsi   = 100 - (100 / (1 + rs))
-
-    # MACD (12/26/9)
-    ema12       = close.ewm(span=12, adjust=False).mean()
-    ema26       = close.ewm(span=26, adjust=False).mean()
-    macd_line   = ema12 - ema26
-    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
-
-    # ATR (14-period)
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low  - prev_close).abs()
-    ], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
-
-    # Bollinger Bands
-    bb_mid   = close.rolling(20).mean()
-    bb_std   = close.rolling(20).std()
-    bb_upper = bb_mid + 2 * bb_std
-    bb_lower = bb_mid - 2 * bb_std
-
-STEP 3 — ENTRY/EXIT SIGNALS (boolean Series, shift(1) mandatory):
-
-    entries = (close > ema20) & (rsi < 30)
-    entries = entries.shift(1).fillna(False)   # mandatory: fillna(False)
-
-    exits   = close < (close.shift(1) - 2 * atr)
-    exits   = exits.shift(1).fillna(False)     # mandatory: fillna(False)
-
-STEP 4 — PORTFOLIO CREATION (exact required signature):
-
+CORRECT portfolio creation:
+    entries = (condition_a) & (condition_b)
+    exits = (condition_c) | (condition_d)
+    entries = entries.fillna(False)
+    exits = exits.fillna(False)
     portfolio = vbt.Portfolio.from_signals(
-        close,
+        data['Close'],
         entries,
         exits,
-        fees=0.001,        # mandatory: 0.1% fees
-        slippage=0.001,    # mandatory: 0.1% slippage
-        freq="D",          # mandatory
-        init_cash=10_000,
-    )
-
-    # With ATR-based stop-loss (fraction of price, not a price level):
-    sl_stop = (2 * atr / close).shift(1).fillna(0.02).clip(0.005, 0.20)
-    portfolio = vbt.Portfolio.from_signals(
-        close,
-        entries,
-        exits,
-        sl_stop=sl_stop,
         fees=0.001,
         slippage=0.001,
-        freq="D",
-        init_cash=10_000,
+        freq='D'
     )
 
-STEP 5 — PRINT METRICS:
-
-    print("Sharpe Ratio:", portfolio.sharpe_ratio())
-    print("Max Drawdown:", portfolio.max_drawdown())
-    print("Total Return:", portfolio.total_return())
-    print("Total Trades:", portfolio.trades.count())
-
-===============================================================
-ABSOLUTELY FORBIDDEN — DO NOT USE (non-existent in vbt 1.0.0):
-===============================================================
-
-    vbt.ta.*                   # entire namespace does not exist
-    vbt.ta.ema(...)
-    vbt.ta.rsi(...)
-    vbt.ta.macd(...)
-    vbt.ta.atr(...)
+FORBIDDEN — never use these:
     vbt.ta.RSI.run(...)
     vbt.ta.MACD.run(...)
     vbt.ta.ATR.run(...)
-    vbt.ta.EMA.run(...)
-    vbt.RSI.run(...)
-    vbt.MACD.run(...)
+    vbt.ta.ema(...)
     vbt.logical_and(...)
-    vbt.logical_or(...)
     vbt.Signals(...)
-    portfolio.total_trades()   # wrong — use portfolio.trades.count()
-    portfolio.num_trades       # wrong attribute name
+    stop_loss=<Series>
 
-===============================================================
-EXECUTION CONTRACT (mandatory)
-===============================================================
+TRADE COUNT REQUIREMENT — CRITICAL:
+The backtest MUST produce at least 20 trades. This is a hard requirement.
 
-* The Portfolio object MUST be assigned to a variable named exactly: portfolio
-* Do NOT wrap portfolio creation inside a function
-* portfolio must exist as a top-level variable in the script
+To improve trade frequency:
 
-===============================================================
-CORE REQUIREMENTS
-===============================================================
+- Download at least 5 years of history:
+  yf.download(symbol, period="5y")
 
-* Use yfinance, period="2y" minimum
-* All indicators: pure pandas / numpy only — NO vbt.ta.*
-* entries and exits are boolean Series — ALWAYS .fillna(False)
-* Every Portfolio.from_signals call MUST include: fees=0.001, slippage=0.001, freq="D"
-* Shift all signal Series by 1 bar before use (no lookahead)
-* Deterministic only — no random parameters
-* Handle NaN values defensively
+- Prefer broad, repeatable entry conditions.
 
-===============================================================
-OUTPUT REQUIREMENTS
-===============================================================
+Examples of GOOD entry conditions:
+    entries = (rsi < 50)
+    entries = (close > ema20) & (rsi < 60)
+    entries = (close > ema20)
 
-* Return ONLY executable Python code
-* No markdown fences. No explanations. No conversational text.
-* Clean variable naming. Runnable immediately.'''
+Examples of GOOD exit conditions:
+    exits = (rsi > 55) | (close < ema50)
+
+Avoid strategies that trigger only a handful of times.
+
+Examples of BAD conditions:
+    rsi < 30
+    strict crossover-only logic
+    extremely narrow ATR filters
+    exits that almost never trigger
+
+MINIMUM TRADE RULES:
+
+- If using RSI:
+    prefer thresholds around 50–60 rather than 30–35.
+
+- If using EMA logic:
+    avoid requiring rare crossover events alone.
+
+- Use enough history to produce statistically meaningful trade counts.
+
+- Do not rely solely on stop-loss exits.
+
+CORE REQUIREMENTS:
+
+* Use only pandas for indicator calculations.
+* Never use vbt.ta APIs.
+* Download data with:
+  yf.download(symbol, period="5y")
+* Include:
+  fees=0.001
+  slippage=0.001
+* Always pass:
+  freq="D"
+* Call fillna(False) on entries and exits.
+* The final Portfolio object MUST be named exactly:
+  portfolio
+
+EXECUTION CONTRACT:
+
+* portfolio = vbt.Portfolio.from_signals(...) must exist as a top-level variable.
+* Do not wrap portfolio creation inside a function.
+
+OUTPUT REQUIREMENTS:
+
+* Return ONLY executable Python code.
+* No markdown.
+* No explanations.
+* No backticks.
+* Clean variable names.
+* Runnable immediately.
+'''
 
     async def generate(self, research_output: dict) -> dict:
         prompt = f'''Write a vectorbt backtest for this trade idea:
