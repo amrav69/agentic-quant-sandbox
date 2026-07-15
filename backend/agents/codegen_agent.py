@@ -45,6 +45,8 @@ CORRECT portfolio creation:
     )
 
 FORBIDDEN — never use these:
+    data['Close']                    # WRONG — returns DataFrame with multi-level columns
+    data['Close'].squeeze()          # CORRECT — always use .squeeze() to get a Series
     vbt.ta.RSI.run(...)
     vbt.ta.MACD.run(...)
     vbt.ta.ATR.run(...)
@@ -93,6 +95,11 @@ MINIMUM TRADE RULES:
 
 CORE REQUIREMENTS:
 
+* Always call .squeeze() on data['Close'], data['High'], and data['Low'] immediately after downloading data:
+
+  close = data['Close'].squeeze()
+  high = data['High'].squeeze()
+  low = data['Low'].squeeze()
 * Use only pandas for indicator calculations.
 * Never use vbt.ta APIs.
 * Download data with:
