@@ -37,7 +37,10 @@ class RiskConfig:
     max_correlation: float = 0.85
     kelly_cap: float = 0.25
     default_confidence: float = 0.95
-    min_trade_count: int = 30
+    # Pipeline-wide minimum trade count for statistical significance.
+    # Must match the executor's LOW_SAMPLE threshold, the CodeGen prompt's
+    # "at least 20 trades" rule, and the Critic's LOW_SAMPLE message.
+    min_trade_count: int = 20
 
     @classmethod
     def from_env(cls) -> RiskConfig:
@@ -49,7 +52,7 @@ class RiskConfig:
             max_correlation=float(os.getenv("MAX_CORRELATION", "0.85")),
             kelly_cap=float(os.getenv("KELLY_CAP", "0.25")),
             default_confidence=float(os.getenv("DEFAULT_CONFIDENCE", "0.95")),
-            min_trade_count=int(os.getenv("MIN_TRADE_COUNT", "30")),
+            min_trade_count=int(os.getenv("MIN_TRADE_COUNT", "20")),
         )
 
 
