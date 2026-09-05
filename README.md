@@ -1,8 +1,8 @@
 # Agentic Quant Sandbox
 
-![Python](https://img.shields.io/badge/python-3.13-blue?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white)
 ![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.11x-009688?logo=fastapi&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![CI](https://img.shields.io/badge/CI-passing-brightgreen?logo=github-actions&logoColor=white)
 
@@ -54,7 +54,9 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
 
 ┌──────────────────────────────────────────┐
 │         FastAPI Backend (:8000)          │
-│   /analyze/{symbol}  /critique  /stream  │
+│  POST /analyze  GET /analyze/{symbol}   │
+│  POST /generate  POST /critique          │
+│  POST /analyze/stream  GET /runs         │
 └──────────────────┬───────────────────────┘
                    │ HTTP / SSE
 ┌──────────────────▼───────────────────────┐
@@ -71,7 +73,7 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
 |---|---|---|
 | **ResearchAgent** | Fetches live indicators, classifies market regime, proposes trade hypothesis with entry, stop-loss, and invalidation conditions | JSON — `regime`, `regime_label`, `indicator_reading`, `trade_hypothesis`, `confidence` |
 | **CodeGenAgent** | Translates the research output into executable vectorbt backtest code | JSON — `code` (Python string), `based_on` (research summary) |
-| **CriticAgent** | Audits the generated strategy against a fixed rubric of 12 failure categories | JSON — `verdict` (PASS/FAIL), `issues[]` with severity, `suggestions[]` |
+| **CriticAgent** | Audits the generated strategy against a fixed rubric of 13 failure categories | JSON — `verdict` (PASS/FAIL), `issues[]` with severity, `suggestions[]` |
 
 ---
 
@@ -79,13 +81,13 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
 
 | Layer | Technology |
 |---|---|
-| **Backend** | Python 3.13, FastAPI, uvicorn |
-| **Agents** | LangChain, Groq (LLaMA 3), async LLM inference |
+| **Backend** | Python 3.12, FastAPI, uvicorn |
+| **Agents** | LangChain, async LLM inference — Groq (LLaMA 3) by default, Gemini / OpenAI supported |
 | **Market Data** | yfinance (1m candles, auto-fallback from 1d → 5d) |
-| **Indicators** | pandas-ta — RSI (14), MACD (12/26/9), EMA (20/50), ATR (14) |
+| **Indicators** | Rust quant-core first (RSI, EMA, MACD), pandas-ta fallback — RSI (14), MACD (12/26/9), EMA (20/50), ATR (14) |
 | **API** | REST + Server-Sent Events (SSE) streaming pipeline |
 | **Rust TUI** | Ratatui + crossterm + tokio + reqwest (`rust/aqs-tui`) |
-| **Rust Core** | quant-core — SMA, EMA, RSI, ATR in safe Rust (`rust/quant-core`) |
+| **Rust Core** | quant-core — SMA, EMA, RSI, MACD, Bollinger Bands in safe Rust (`rust/quant-core`) |
 | **Testing** | pytest, pytest-asyncio, hypothesis (property tests), criterion (Rust benchmarks) |
 | **Orchestration** | LangGraph StateGraph — feedback loop with max 2 iterations |
 | **Persistence** | MongoDB (motor) — all pipeline runs stored |
@@ -98,9 +100,9 @@ Autonomous multi-agent AI system for quantitative trading research, backtest gen
 
 ### Prerequisites
 
-- Python 3.13
+- Python 3.12
 - Rust stable toolchain (`rustup install stable`)
-- A Groq API key — [console.groq.com](https://console.groq.com)
+- An LLM API key (Groq by default — [console.groq.com](https://console.groq.com); Gemini / OpenAI also supported)
 
 ### Clone and Setup
 
@@ -144,9 +146,11 @@ Key endpoints:
 
 ```
 GET  /health
-POST /analyze                 # Research Agent only
+POST /analyze                 # Research Agent only (explicit indicators)
+GET  /analyze/{symbol}         # Research Agent, fully autonomous (fetch + indicators)
 POST /generate                # Research + CodeGen
 POST /critique                # Full pipeline with LangGraph feedback loop
+POST /analyze/stream          # Pipeline streamed as SSE events (not persisted)
 GET  /runs                    # Last 20 pipeline runs
 GET  /runs/{id}               # Single run by ID
 ```
@@ -171,9 +175,10 @@ The TUI connects to the backend at `http://127.0.0.1:8000`. Start the backend be
 agentic-quant-sandbox/
 ├── backend/
 │   ├── main.py                 # FastAPI app, route definitions
-│   ├── llm_client.py           # Groq client initialization
+│   ├── llm_client.py           # Groq (default) / Gemini / OpenAI client init
 │   ├── cache.py                # TTL cache decorator
 │   ├── redis_cache.py          # Async Redis cache (TTL 300s)
+│   ├── quant_bridge.py         # Rust quant-core first, pandas-ta fallback
 │   ├── logging_config.py       # Structured logging setup
 │   ├── agents/
 │   │   ├── research_agent.py   # Market regime analysis + indicator auto-fetch
@@ -185,14 +190,20 @@ agentic-quant-sandbox/
 │   │   └── mongo.py            # MongoDB persistence (motor)
 │   ├── data/
 │   │   └── fetcher.py          # yfinance data fetch with TTL caching
+│   ├── execution/              # Sandboxed vectorbt runner
+│   │   ├── executor.py         # Subprocess execution + LOW_SAMPLE override
+│   │   ├── sanitizer.py        # AST safety checks for generated code
+│   │   ├── metric_injector.py  # Stdout sentinel metrics extraction
+│   │   └── models.py           # ExecutionResult / ExecutionStatus
 │   ├── quant/
-│   │   ├── indicators.py       # RSI, MACD, EMA, ATR via pandas-ta
+│   │   ├── indicators.py       # RSI, MACD, EMA, ATR via quant_bridge
 │   │   └── market_context.py   # Multi-timeframe context
-│   └── risk/                   # Position sizing, VaR, Kelly criterion
+│   └── risk/
+│       └── engine.py           # Position sizing, VaR, Kelly, trade validation
 ├── rust/
 │   ├── Cargo.toml              # Workspace definition
 │   ├── aqs-tui/
-│   │   └── src/main.rs         # Ratatui terminal UI (~1800 lines)
+│   │   └── src/main.rs         # Ratatui terminal UI (~1900 lines)
 │   ├── quant-core/
 │   │   └── src/                # Rust indicator implementations
 │   └── feed-ingestor/          # Real-time feed ingestion (WIP)
@@ -201,15 +212,28 @@ agentic-quant-sandbox/
 │   ├── test_agents.py
 │   ├── test_api.py
 │   ├── test_api_edge_cases.py
+│   ├── test_cache.py
+│   ├── test_critic_risk_integration.py
+│   ├── test_executor.py
 │   ├── test_indicators_unit.py
+│   ├── test_logging_config.py
 │   ├── test_market_context.py
-│   ├── test_risk_engine.py
+│   ├── test_mongo.py
+│   ├── test_pipeline_graph.py
 │   ├── test_property.py        # hypothesis property-based tests
-├── requirements.txt
+│   ├── test_quant_bridge.py
+│   ├── test_risk_edge_cases.py
+│   ├── test_risk_engine.py
+│   └── benchmarks/
+│       └── test_risk_benchmarks.py
+├── .env.example
+├── requirements.txt            # vectorbt==1.0.0, plotly==6.7.0 (pinned: plotly 7 breaks vectorbt import)
 ├── requirements-dev.txt
 ├── pyproject.toml
+├── Cargo.toml
 ├── Dockerfile
 ├── docker-compose.yml
+├── LICENSE
 └── Makefile
 ```
 
