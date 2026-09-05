@@ -5,6 +5,66 @@ import json
 import re
 from typing import Dict, Any, Optional
 
+# ---------------------------------------------------------------------------
+# Real-signal parsing helpers
+# ---------------------------------------------------------------------------
+
+# Hypothesis JSON keys that may carry the stop-loss level (in priority order).
+_STOP_LEVEL_KEYS = ("stop_loss_level", "stop_loss", "stop")
+
+# Code markers indicating an explicit stop-loss implementation in generated code.
+_STOP_CODE_MARKERS = ("sl_stop", "stop_loss", "stop-loss", "stoploss", "trailing")
+
+
+def _extract_stop_level(analysis: str, entry_price: float) -> float | None:
+    """Parse a numeric stop-loss price from the research hypothesis JSON.
+
+    Returns ``None`` when the hypothesis defines no machine-readable stop
+    (non-JSON prose, missing key, or unparseable/non-positive value). A
+    stop at or above a known entry price is rejected — it cannot protect
+    a long position.
+    """
+    if not isinstance(analysis, str) or not analysis:
+        return None
+    try:
+        payload = json.loads(analysis)
+    except (json.JSONDecodeError, TypeError):
+        match = re.search(r"\{.*\}", analysis, re.DOTALL)
+        if not match:
+            return None
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    for key in _STOP_LEVEL_KEYS:
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        num = re.search(r"\$?\s*(\d+(?:\.\d+)?)", str(raw))
+        if not num:
+            continue
+        try:
+            stop = float(num.group(1))
+        except ValueError:
+            continue
+        if stop <= 0:
+            continue
+        if entry_price > 0 and stop >= entry_price:
+            continue
+        return stop
+    return None
+
+
+def _code_has_stop(code: str) -> bool:
+    """Return True when *code* contains an explicit stop-loss implementation."""
+    if not isinstance(code, str) or not code:
+        return False
+    lowered = code.lower()
+    return any(marker in lowered for marker in _STOP_CODE_MARKERS)
+
+
 class CriticAgent:
     """
     Skeptical, risk-focused institutional quant reviewer agent.
@@ -134,7 +194,9 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
 
             parsed_critique = CriticAgent._parse_json(content)
 
-            risk_flags = self._run_risk_checks(research_analysis, generated_code)
+            risk_flags = self._run_risk_checks(
+                research_analysis, generated_code, execution_result
+            )
 
             if risk_flags:
                 parsed_critique.setdefault("risk_flags", []).extend(risk_flags)
@@ -188,28 +250,57 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
     def _run_risk_checks(
         self,
         research_analysis: Dict[str, Any],
-        generated_code: Dict[str, Any]
+        generated_code: Dict[str, Any],
+        execution_result: Optional[Dict[str, Any]] = None,
     ) -> list[str]:
-        """Run quantitative risk checks and return a list of flag messages."""
-        flags: list[str] = []
-        raw_data = research_analysis.get("raw_data", {})
-        symbol = raw_data.get("symbol", "UNKNOWN")
-        analysis = research_analysis.get("analysis", "")
+        """Run quantitative risk checks and return a list of flag messages.
 
-        # Extract real trade parameters from raw payload data when available.
+        All checks run against real pipeline artifacts — never placeholders:
+
+        - signal entry/stop come from the research payload and hypothesis;
+        - the equity curve is seeded from the measured backtest drawdown;
+        - trade count and stop-loss presence are read from the execution
+          result, hypothesis JSON, and generated code respectively.
+        """
+        flags: list[str] = []
+        raw_data = research_analysis.get("raw_data", {}) or {}
+        symbol = raw_data.get("symbol", "UNKNOWN")
+        analysis = research_analysis.get("analysis", "") or ""
+        code = generated_code.get("code", "") or ""
+
+        # Real entry price from the research payload.
         raw_price = raw_data.get("price") or raw_data.get("current_price")
         entry_price = raw_price if isinstance(raw_price, (int, float)) else 0.0
 
+        # Real stop-loss level parsed from the research hypothesis JSON.
+        # Falls back to a 5 % protective stop only for validator input —
+        # a missing hypothesis stop is still flagged below.
+        stop_price = _extract_stop_level(analysis, entry_price)
+
         signal = {
             "symbol": symbol,
-            "side": "BUY",
+            "side": "BUY",  # CodeGen only emits long vectorbt strategies
             "entry": entry_price,
-            "stop": entry_price * 0.95 if entry_price > 0 else 0.0,
-            "size": 100,
+            "stop": (
+                stop_price
+                if stop_price is not None
+                else (entry_price * 0.95 if entry_price > 0 else 0.0)
+            ),
+            "size": 100,  # default; TradeValidator enforces portfolio-level limits
         }
 
+        # Real portfolio state: seed the equity curve from the measured
+        # backtest drawdown so the max-drawdown check evaluates real data.
+        # Without an execution result the curve stays empty and the check
+        # passes vacuously, as before.
+        equity_curve: list[float] = []
+        if execution_result:
+            max_dd = execution_result.get("max_drawdown")
+            if isinstance(max_dd, (int, float)) and max_dd > 0:
+                equity_curve = [1.0, 1.0 - float(max_dd)]
+
         portfolio_state: Dict[str, Any] = {
-            "equity_curve": [],
+            "equity_curve": equity_curve,
             "positions": {},
             "returns": None,
             "returns_list": [],
@@ -220,6 +311,25 @@ Perform a strict quant audit on the methodology and code. Detail every issue, su
         approved, reasons = validator.validate(signal, portfolio_state)
         if not approved:
             flags.extend(reasons)
+
+        # Real trade-count check against the pipeline minimum. LOW_SAMPLE is
+        # deliberately skipped — critique() already reports it as a serious
+        # issue without forcing FAIL, and this must not override that choice.
+        if execution_result and execution_result.get("status") == "SUCCESS":
+            total_trades = execution_result.get("total_trades")
+            min_trades = validator.config.min_trade_count
+            if isinstance(total_trades, int) and total_trades < min_trades:
+                flags.append(
+                    f"Backtest produced {total_trades} trades, "
+                    f"below minimum {min_trades}"
+                )
+
+        # Real stop-loss presence check across both artifacts.
+        if stop_price is None and not _code_has_stop(code):
+            flags.append(
+                "No explicit stop-loss detected in research hypothesis "
+                "or generated code"
+            )
 
         # Check if the research itself mentions high-risk patterns
         risk_keywords = [
