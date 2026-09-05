@@ -19,6 +19,17 @@ pub fn calculate_ema(prices: &[f64], period: usize) -> Result<Vec<f64>, QuantErr
     indicators::ema(prices, period)
 }
 
+/// Pure Rust ATR calculation over high/low/close series.
+/// Returns a Vec of the same length; the first `period - 1` values are NaN.
+pub fn calculate_atr(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    period: usize,
+) -> Result<Vec<f64>, QuantError> {
+    indicators::atr(high, low, close, period)
+}
+
 /// Pure Rust MACD calculation.
 pub fn calculate_macd(
     prices: &[f64],
@@ -79,7 +90,7 @@ pub extern "C" fn calc_rsi(
 
 #[cfg(feature = "python")]
 pub mod python {
-    use crate::{calculate_ema, calculate_macd, calculate_rsi};
+    use crate::{calculate_atr, calculate_ema, calculate_macd, calculate_rsi};
     use pyo3::prelude::*;
 
     #[pyfunction]
@@ -106,10 +117,22 @@ pub mod python {
         Ok((out.macd_line, out.signal_line, out.histogram))
     }
 
+    #[pyfunction]
+    pub fn calculate_atr_py(
+        high: Vec<f64>,
+        low: Vec<f64>,
+        close: Vec<f64>,
+        period: usize,
+    ) -> PyResult<Vec<f64>> {
+        calculate_atr(&high, &low, &close, period)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
     #[pymodule]
     fn quant_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(calculate_rsi_py, m)?)?;
         m.add_function(wrap_pyfunction!(calculate_ema_py, m)?)?;
+        m.add_function(wrap_pyfunction!(calculate_atr_py, m)?)?;
         m.add_function(wrap_pyfunction!(calculate_macd_py, m)?)?;
         Ok(())
     }
@@ -147,6 +170,18 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_atr_wrapper() {
+        let n = 100;
+        let close = make_data(n);
+        let high: Vec<f64> = close.iter().map(|&c| c + 0.75).collect();
+        let low: Vec<f64> = close.iter().map(|&c| c - 0.5).collect();
+        let result = calculate_atr(&high, &low, &close, 14).unwrap();
+        assert_eq!(result.len(), n);
+        assert!(result[..13].iter().all(|v| v.is_nan()));
+        assert!(result[13..].iter().all(|&v| v.is_finite() && v >= 0.0));
+    }
+
+    #[test]
     fn test_calculate_macd_wrapper() {
         let data = make_data(100);
         let result = calculate_macd(&data, 5, 13, 5).unwrap();
@@ -169,6 +204,7 @@ mod tests {
         assert!(calculate_rsi(&[], 14).is_err());
         assert!(calculate_sma(&[], 14).is_err());
         assert!(calculate_ema(&[], 14).is_err());
+        assert!(calculate_atr(&[], &[], &[], 14).is_err());
         assert!(calculate_macd(&[], 5, 13, 5).is_err());
         assert!(calculate_bollinger(&[], 20, 2.0).is_err());
     }

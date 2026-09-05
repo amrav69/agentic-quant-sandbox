@@ -33,6 +33,7 @@ cargo clippy --workspace -- -D warnings
 | `rsi(data, period)` | Relative Strength Index (14 default) |
 | `macd(data, fast, slow, signal)` | MACD line + signal + histogram |
 | `bollinger_bands(data, period, std_dev)` | Upper / middle / lower bands |
+| `atr(high, low, close, period)` | Average True Range, Wilder's smoothing (pandas-ta parity) |
 | `highest(data, period)` | Rolling maximum |
 | `lowest(data, period)` | Rolling minimum |
 

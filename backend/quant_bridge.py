@@ -74,6 +74,26 @@ def calculate_ema(close: pd.Series, period: int = 20) -> pd.Series:
     return ta.ema(close, length=period)
 
 
+def calculate_atr(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    period: int = 14,
+) -> pd.Series:
+    """Return ATR (Wilder's smoothing) as a pandas Series aligned to *close*."""
+    if _RUST_AVAILABLE:
+        try:
+            result = _qc.calculate_atr_py(  # type: ignore[union-attr]
+                _to_list(high), _to_list(low), _to_list(close), period
+            )
+            return _to_series(result, close.index)
+        except Exception as exc:
+            logger.warning("quant_bridge.calculate_atr: Rust failed (%s), falling back to pandas-ta", exc)
+
+    import pandas_ta as ta  # noqa: F401
+    return ta.atr(high, low, close, length=period)
+
+
 def calculate_macd(
     close: pd.Series,
     fast: int = 12,

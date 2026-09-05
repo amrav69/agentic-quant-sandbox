@@ -84,5 +84,29 @@ proptest! {
         prop_assert!(quant_core::indicators::bollinger_bands(&data, 0, 2.0).is_err());
         prop_assert!(quant_core::indicators::highest(&data, 0).is_err());
         prop_assert!(quant_core::indicators::lowest(&data, 0).is_err());
+        prop_assert!(quant_core::indicators::atr(&data, &data, &data, 0).is_err());
+    }
+
+    #[test]
+    fn atr_never_panics_nor_negative(
+        close in prop::collection::vec(0.01f64..10000.0, 15..200),
+        spread in prop::collection::vec(0.0f64..100.0, 15..200),
+    ) {
+        // Build well-formed OHLC around the close series; lengths match by construction.
+        let n = close.len().min(spread.len());
+        let (close, spread) = (close[..n].to_vec(), spread[..n].to_vec());
+        let high: Vec<f64> = close.iter().zip(spread.iter()).map(|(c, s)| c + s).collect();
+        let low: Vec<f64> = close.iter().zip(spread.iter()).map(|(c, s)| (c - s).max(0.01)).collect();
+        let period = 14usize;
+        if period <= n {
+            let result = quant_core::indicators::atr(&high, &low, &close, period);
+            prop_assert!(result.is_ok());
+            if let Ok(v) = result {
+                prop_assert_eq!(v.len(), n);
+                for &val in v.iter().skip(period - 1) {
+                    prop_assert!(val.is_finite() && val >= 0.0, "ATR out of range: {val}");
+                }
+            }
+        }
     }
 }

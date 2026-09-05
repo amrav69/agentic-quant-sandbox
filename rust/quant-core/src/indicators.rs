@@ -208,6 +208,69 @@ pub fn highest(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     Ok(result)
 }
 
+/// Average True Range with Wilder's smoothing, matching pandas-ta defaults
+/// (`atr(high, low, close, length, presma=True)`):
+///
+/// * True Range of each bar: `max(|high-low|, |high-prev_close|,
+///   |prev_close-low|)`, with the first bar falling back to `|high-low|`.
+/// * Like pandas-ta's `non_zero_range`, a whole-series `f64::EPSILON` bump
+///   is applied to the high-low range when any bar is perfectly flat.
+/// * The value at index `period - 1` is seeded with the mean of the first
+///   `period` True Ranges, then smoothed with Wilder's RMA
+///   (`alpha = 1 / period`).
+///
+/// The output has the same length as the input; the first `period - 1`
+/// values are NaN.
+pub fn atr(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    period: usize,
+) -> Result<Vec<f64>, QuantError> {
+    let n = high.len();
+    if n == 0 || low.is_empty() || close.is_empty() {
+        return Err(QuantError::EmptyInput);
+    }
+    if low.len() != n || close.len() != n {
+        return Err(QuantError::Internal(format!(
+            "mismatched OHLC lengths: high={n}, low={}, close={}",
+            low.len(),
+            close.len()
+        )));
+    }
+    if period == 0 || period > n {
+        return Err(QuantError::InsufficientData {
+            required: period,
+            available: n,
+        });
+    }
+
+    let needs_eps = high.iter().zip(low.iter()).any(|(&h, &l)| h - l == 0.0);
+    let eps = if needs_eps { f64::EPSILON } else { 0.0 };
+
+    let mut tr = Vec::with_capacity(n);
+    for i in 0..n {
+        let hl = (high[i] - low[i]).abs() + eps;
+        let tr_i = if i == 0 {
+            hl
+        } else {
+            let hc = (high[i] - close[i - 1]).abs();
+            let cl = (close[i - 1] - low[i]).abs();
+            hl.max(hc).max(cl)
+        };
+        tr.push(tr_i);
+    }
+
+    let mut out = vec![f64::NAN; n];
+    let seed: f64 = tr[..period].iter().sum::<f64>() / period as f64;
+    out[period - 1] = seed;
+    let alpha = 1.0 / period as f64;
+    for i in period..n {
+        out[i] = out[i - 1] + alpha * (tr[i] - out[i - 1]);
+    }
+    Ok(out)
+}
+
 pub fn lowest(data: &[f64], period: usize) -> Result<Vec<f64>, QuantError> {
     if data.is_empty() {
         return Err(QuantError::EmptyInput);
@@ -242,6 +305,13 @@ mod tests {
         (0..n)
             .map(|i| base + (i as f64 * 0.5) + (i as f64).sin())
             .collect()
+    }
+
+    fn ohlc_data(n: usize, base: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let close = make_data(n, base);
+        let high: Vec<f64> = close.iter().map(|&c| c + 0.75).collect();
+        let low: Vec<f64> = close.iter().map(|&c| c - 0.5).collect();
+        (high, low, close)
     }
 
     #[test]
@@ -441,6 +511,8 @@ mod tests {
         assert!(bollinger_bands(&data, 0, 2.0).is_err());
         assert!(highest(&data, 0).is_err());
         assert!(lowest(&data, 0).is_err());
+        let (h, l, c) = ohlc_data(100, 100.0);
+        assert!(atr(&h, &l, &c, 0).is_err());
     }
 
     #[test]
@@ -448,6 +520,85 @@ mod tests {
         assert!(sma(&vec![1.0], 1).is_ok());
         assert!(rsi(&vec![1.0], 1).is_ok());
         assert!(ema(&vec![1.0], 1).is_ok());
+    }
+
+    #[test]
+    fn test_atr_empty() {
+        let empty: Vec<f64> = vec![];
+        assert!(atr(&empty, &empty, &empty, 14).is_err());
+        assert!(atr(&[1.0], &[], &[1.0], 14).is_err());
+    }
+
+    #[test]
+    fn test_atr_mismatched_lengths() {
+        let h = vec![10.0, 11.0, 12.0];
+        let l = vec![9.0, 9.5];
+        let c = vec![9.5, 10.5, 11.5];
+        assert!(atr(&h, &l, &c, 2).is_err());
+    }
+
+    #[test]
+    fn test_atr_insufficient() {
+        let (h, l, c) = ohlc_data(10, 100.0);
+        assert!(atr(&h, &l, &c, 11).is_err());
+    }
+
+    #[test]
+    fn test_atr_known_values() {
+        // TR0 = |10-9| = 1
+        // TR1 = max(|11-9.5|, |11-9.5|, |9.5-9.5|) = 1.5
+        // TR2 = max(|12-10|, |12-10.5|, |10.5-10|) = 2
+        // seed = (1 + 1.5) / 2 = 1.25; ATR2 = 1.25 + (2 - 1.25) / 2 = 1.625
+        let h = vec![10.0, 11.0, 12.0];
+        let l = vec![9.0, 9.5, 10.0];
+        let c = vec![9.5, 10.5, 11.5];
+        let result = atr(&h, &l, &c, 2).unwrap();
+        assert_eq!(result.len(), 3);
+        assert!(result[0].is_nan());
+        assert!((result[1] - 1.25).abs() < 1e-12);
+        assert!((result[2] - 1.625).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_atr_flat_series_near_zero() {
+        let h = vec![100.0; 50];
+        let l = vec![100.0; 50];
+        let c = vec![100.0; 50];
+        let result = atr(&h, &l, &c, 14).unwrap();
+        assert_eq!(result.len(), 50);
+        for (i, &v) in result.iter().enumerate() {
+            if i < 13 {
+                assert!(v.is_nan(), "ATR[{i}] should be NaN during warmup");
+            } else {
+                assert!(v >= 0.0 && v < 1e-9, "flat ATR[{i}]={v} should be ~0");
+            }
+        }
+    }
+
+    #[test]
+    fn test_atr_gap_counts() {
+        // Overnight gap larger than the intraday range must dominate TR.
+        let h = vec![100.0, 110.0];
+        let l = vec![99.0, 109.0];
+        let c = vec![99.5, 109.5];
+        let result = atr(&h, &l, &c, 1).unwrap();
+        // TR0 = 1, TR1 = max(1, |110-99.5|, |99.5-109|) = 10.5
+        assert!((result[0] - 1.0).abs() < 1e-12);
+        assert!((result[1] - 10.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_atr_non_negative_and_shaped() {
+        let (h, l, c) = ohlc_data(100, 100.0);
+        let result = atr(&h, &l, &c, 14).unwrap();
+        assert_eq!(result.len(), 100);
+        for (i, &v) in result.iter().enumerate() {
+            if i < 13 {
+                assert!(v.is_nan());
+            } else {
+                assert!(v.is_finite() && v >= 0.0, "ATR[{i}]={v} invalid");
+            }
+        }
     }
 
     #[test]
@@ -461,5 +612,7 @@ mod tests {
         assert_eq!(bb.lower.len(), 100);
         let macd = macd(&data, 5, 13, 5).unwrap();
         assert_eq!(macd.macd_line.len(), 100);
+        let (h, l, c) = ohlc_data(100, 100.0);
+        assert_eq!(atr(&h, &l, &c, 14).unwrap().len(), 100);
     }
 }
