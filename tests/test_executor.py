@@ -13,7 +13,7 @@ import pytest
 from backend.execution.sanitizer import sanitize_code
 from backend.execution.metric_injector import inject_metrics_extraction, METRICS_SENTINEL
 from backend.execution.models import ExecutionResult, ExecutionStatus
-from backend.execution.executor import execute_backtest
+from backend.execution.executor import execute_backtest, _safe_env
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -71,6 +71,18 @@ class TestSanitizer:
         ok, reason = sanitize_code("from multiprocessing import Pool")
         assert ok is False
 
+    def test_import_ctypes_rejected(self):
+        ok, reason = sanitize_code("import ctypes")
+        assert ok is False
+
+    def test_import_importlib_rejected(self):
+        ok, reason = sanitize_code("import importlib")
+        assert ok is False
+
+    def test_import_inspect_rejected(self):
+        ok, reason = sanitize_code("import inspect")
+        assert ok is False
+
     # ── Blocked function calls ────────────────────────────────────────────
 
     def test_eval_rejected(self):
@@ -83,6 +95,19 @@ class TestSanitizer:
         ok, reason = sanitize_code("exec('x = 1')")
         assert ok is False
         assert "exec" in reason
+
+    def test_builtins_subscript_exec_rejected(self):
+        ok, reason = sanitize_code('__builtins__["exec"]("print(\'hi\')")')
+        assert ok is False
+        assert reason is not None
+
+    def test_breakpoint_rejected(self):
+        ok, reason = sanitize_code("breakpoint()")
+        assert ok is False
+
+    def test_set_trace_rejected(self):
+        ok, reason = sanitize_code("set_trace()")
+        assert ok is False
 
     def test_open_rejected(self):
         ok, reason = sanitize_code("f = open('secret.txt', 'r')")
@@ -291,3 +316,20 @@ portfolio = None
         """execute_backtest always returns an ExecutionResult — never raises."""
         result = await execute_backtest("import os", timeout=5)
         assert isinstance(result, ExecutionResult)
+
+    def test_safe_env_strips_secrets(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "secret_groq")
+        monkeypatch.setenv("OPENAI_API_KEY", "secret_openai")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "secret_anthropic")
+        monkeypatch.setenv("BINANCE_SECRET", "secret_binance")
+        monkeypatch.setenv("GEMINI_KEY", "secret_gemini")
+        monkeypatch.setenv("SAFE_TEST_VAR", "safe_value")
+
+        env = _safe_env()
+        assert "GROQ_API_KEY" not in env
+        assert "OPENAI_API_KEY" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "BINANCE_SECRET" not in env
+        assert "GEMINI_KEY" not in env
+        assert env.get("SAFE_TEST_VAR") == "safe_value"
+

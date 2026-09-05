@@ -101,8 +101,8 @@ async def execute_backtest(
         # ── Step 4 & 5: Subprocess + timeout ──────────────────────────────
         try:
             stdout_text, stderr_text, return_code = await asyncio.wait_for(
-                _run_subprocess_safe(tmp_path),
-                timeout=timeout,
+                _run_subprocess_safe(tmp_path, timeout=timeout),
+                timeout=timeout + 5,
             )
         except asyncio.TimeoutError:
             logger.warning("execute_backtest: timeout after %ds", timeout)
@@ -179,16 +179,52 @@ async def execute_backtest(
 # ---------------------------------------------------------------------------
 
 
-async def _run_subprocess_safe(script_path: Path) -> tuple[str, str, int]:
+def _safe_env() -> dict[str, str]:
+    """Return a copy of os.environ with sensitive variables removed."""
+    _SECRET_PREFIXES = (
+        "GROQ_",
+        "OPENAI_",
+        "ANTHROPIC_",
+        "BINANCE_",
+        "GEMINI_",
+    )
+
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if not any(k.startswith(prefix) for prefix in _SECRET_PREFIXES)
+    }
+
+
+async def _run_subprocess_safe(
+    script_path: Path, timeout: int | None = None
+) -> tuple[str, str, int]:
     if platform.system() == "Windows":
         def _run_sync() -> tuple[str, str, int]:
-            result = _subprocess.run(
+            # Popen (not subprocess.run) so we can kill on timeout.
+            # asyncio.wait_for cancellation cannot stop a blocking
+            # subprocess.run inside to_thread — the child keeps running
+            # forever and hangs the test session (e.g. `while True`).
+            proc = _subprocess.Popen(
                 [sys.executable, str(script_path)],
-                capture_output=True,
+                stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE,
                 text=True,
-                env=os.environ.copy(),
+                env=_safe_env(),
             )
-            return result.stdout, result.stderr, result.returncode
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except _subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                except Exception:
+                    stdout, stderr = "", ""
+                raise asyncio.TimeoutError()
+            return stdout or "", stderr or "", proc.returncode or 0
 
         return await asyncio.to_thread(_run_sync)
 
@@ -197,7 +233,7 @@ async def _run_subprocess_safe(script_path: Path) -> tuple[str, str, int]:
         str(script_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=os.environ.copy(),
+        env=_safe_env(),
     )
 
     try:

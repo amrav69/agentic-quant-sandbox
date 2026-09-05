@@ -32,6 +32,9 @@ _BLOCKED_IMPORTS: frozenset[str] = frozenset(
         "sqlite3",
         "threading",
         "multiprocessing",
+        "ctypes",
+        "importlib",
+        "inspect",
     }
 )
 
@@ -42,6 +45,9 @@ _BLOCKED_CALLS: frozenset[str] = frozenset(
         "open",
         "__import__",
         "compile",
+        "__subscript_call__",
+        "breakpoint",
+        "set_trace",
     }
 )
 
@@ -109,4 +115,8 @@ def _extract_func_name(func_node: ast.expr) -> str:
         return func_node.id
     if isinstance(func_node, ast.Attribute):
         return func_node.attr
+    if isinstance(func_node, ast.Subscript):
+        # Block any subscript call such as:
+        # __builtins__['exec'](...)
+        return "__subscript_call__"
     return ""
