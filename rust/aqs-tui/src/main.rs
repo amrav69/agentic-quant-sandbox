@@ -6,21 +6,23 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row,
-        ScrollbarState, Table, TableState, Wrap,
+        Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, ScrollbarState, Table,
+        TableState, Wrap,
     },
-    Frame, Terminal,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -108,7 +110,6 @@ enum AppMessage {
     HistoryResult(Vec<HistoryEntry>),
 }
 
-
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum StreamStage {
@@ -117,7 +118,6 @@ enum StreamStage {
     Critic,
     Error,
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API RESPONSE TYPES
@@ -182,7 +182,6 @@ struct CritiqueApiResponse {
     total_iterations: Option<i32>,
 }
 
-
 /// backend returns code wrapped in markdown fences (```python ... ```)
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
@@ -195,17 +194,16 @@ struct GeneratedCode {
 impl GeneratedCode {
     /// Strip markdown code fences so raw Python is displayed cleanly
     fn clean_code(&self) -> String {
-        let Some(code) = &self.code else { return String::new() };
+        let Some(code) = &self.code else {
+            return String::new();
+        };
         let stripped = code
             .trim()
             .strip_prefix("```python")
             .or_else(|| code.trim().strip_prefix("```"))
             .unwrap_or(code)
             .trim_start_matches('\n');
-        let stripped = stripped
-            .strip_suffix("```")
-            .unwrap_or(stripped)
-            .trim_end();
+        let stripped = stripped.strip_suffix("```").unwrap_or(stripped).trim_end();
         stripped.to_string()
     }
 }
@@ -234,36 +232,46 @@ struct CritiqueResult {
     total_iterations: Option<i32>,
 }
 
-
 impl CritiqueResult {
     fn issue_strings(&self) -> Vec<String> {
-        self.issues.as_deref().unwrap_or(&[]).iter().map(|i| {
-            let prefix = i.severity.as_deref()
-                .map(|s| format!("[{}] ", s.to_uppercase()))
-                .unwrap_or_default();
-            format!("{}{}", prefix, i.issue)
-        }).collect()
+        self.issues
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|i| {
+                let prefix = i
+                    .severity
+                    .as_deref()
+                    .map(|s| format!("[{}] ", s.to_uppercase()))
+                    .unwrap_or_default();
+                format!("{}{}", prefix, i.issue)
+            })
+            .collect()
     }
 
     fn suggestion_strings(&self) -> Vec<String> {
-        self.suggestions.as_deref().unwrap_or(&[]).iter().map(|v| {
-            match v {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Object(m) => {
-                    // handle {suggestion: "..."} or {text: "..."}
-                    m.get("suggestion")
-                        .or_else(|| m.get("text"))
-                        .or_else(|| m.get("issue"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string()
+        self.suggestions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|v| {
+                match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Object(m) => {
+                        // handle {suggestion: "..."} or {text: "..."}
+                        m.get("suggestion")
+                            .or_else(|| m.get("text"))
+                            .or_else(|| m.get("issue"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    }
+                    other => other.to_string(),
                 }
-                other => other.to_string(),
-            }
-        }).collect()
+            })
+            .collect()
     }
 }
-
 
 #[derive(Debug, Serialize)]
 struct CritiqueRequest {
@@ -287,7 +295,6 @@ struct HistoryEntry {
     iterations: String,
     timestamp: String,
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AGENT STATUS
@@ -428,7 +435,10 @@ impl App {
     fn input_backspace(&mut self) {
         if self.input_cursor_position > 0 {
             let idx = self.byte_index_at_cursor();
-            let prev_char_len = self.ticker_input[..idx].chars().last().map_or(0, |c| c.len_utf8());
+            let prev_char_len = self.ticker_input[..idx]
+                .chars()
+                .last()
+                .map_or(0, |c| c.len_utf8());
             if prev_char_len > 0 {
                 self.ticker_input.drain(idx - prev_char_len..idx);
                 self.input_cursor_position -= 1;
@@ -439,7 +449,10 @@ impl App {
     fn input_delete(&mut self) {
         let idx = self.byte_index_at_cursor();
         if idx < self.ticker_input.len() {
-            let next_char_len = self.ticker_input[idx..].chars().next().map_or(0, |c| c.len_utf8());
+            let next_char_len = self.ticker_input[idx..]
+                .chars()
+                .next()
+                .map_or(0, |c| c.len_utf8());
             self.ticker_input.drain(idx..idx + next_char_len);
         }
     }
@@ -482,7 +495,6 @@ impl App {
         }
     }
 
-
     // ── History navigation ─────────────────────────────────────────────────
 
     fn history_next(&mut self) {
@@ -517,9 +529,12 @@ impl App {
                 self.history_scroll_state = self.history_scroll_state.content_length(len);
             }
 
-
             AppMessage::HealthCheckResult(ok) => {
-                self.backend_status = if ok { BackendStatus::Online } else { BackendStatus::Offline };
+                self.backend_status = if ok {
+                    BackendStatus::Online
+                } else {
+                    BackendStatus::Offline
+                };
                 self.last_health_check = Instant::now();
                 self.last_response_time = Some(Local::now().format("%H:%M:%S").to_string());
             }
@@ -547,7 +562,9 @@ impl App {
                 self.agents[2].state = AgentState::Done;
                 self.agents[2].last_activity = Local::now().format("%H:%M:%S").to_string();
 
-                let research_conf = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&self.research_output) {
+                let research_conf = if let Ok(v) =
+                    serde_json::from_str::<serde_json::Value>(&self.research_output)
+                {
                     if let Some(conf) = v.get("confidence") {
                         let conf_str = match conf {
                             serde_json::Value::Number(n) => {
@@ -576,7 +593,8 @@ impl App {
                     "-".to_string()
                 };
 
-                let iterations = result.total_iterations
+                let iterations = result
+                    .total_iterations
                     .map(|i| i.to_string())
                     .unwrap_or_else(|| "1".to_string());
 
@@ -610,7 +628,6 @@ impl App {
                 }
             }
 
-
             AppMessage::StreamEvent(stage, data) => {
                 match stage {
                     StreamStage::Research => {
@@ -619,7 +636,8 @@ impl App {
                         if !data.is_empty() {
                             self.research_output = data;
                             self.agents[0].state = AgentState::Done;
-                            self.agents[0].last_activity = Local::now().format("%H:%M:%S").to_string();
+                            self.agents[0].last_activity =
+                                Local::now().format("%H:%M:%S").to_string();
                         }
                     }
                     StreamStage::CodeGen => {
@@ -628,7 +646,8 @@ impl App {
                         if !data.is_empty() {
                             self.codegen_output = data;
                             self.agents[1].state = AgentState::Done;
-                            self.agents[1].last_activity = Local::now().format("%H:%M:%S").to_string();
+                            self.agents[1].last_activity =
+                                Local::now().format("%H:%M:%S").to_string();
                         }
                     }
                     StreamStage::Critic => {
@@ -696,14 +715,12 @@ impl App {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn extract_regime(research: &str) -> String {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(research) {
-        if let Some(obj) = v.as_object() {
-            if let Some(r) = obj.get("regime_label").or_else(|| obj.get("regime")) {
-                if let Some(s) = r.as_str() {
-                    return s.to_string();
-                }
-            }
-        }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(research)
+        && let Some(obj) = v.as_object()
+        && let Some(r) = obj.get("regime_label").or_else(|| obj.get("regime"))
+        && let Some(s) = r.as_str()
+    {
+        return s.to_string();
     }
     // Simple heuristic: look for known keywords
     for word in &["Bullish", "Bearish", "Ranging", "Neutral"] {
@@ -720,7 +737,6 @@ struct RunsApiResponse {
     _count: usize,
 }
 
-
 #[derive(Debug, Deserialize)]
 struct RunDoc {
     symbol: Option<String>,
@@ -731,28 +747,27 @@ struct RunDoc {
 }
 
 fn extract_confidence_from_analysis(analysis_val: &serde_json::Value) -> String {
-    if let Some(analysis_str) = analysis_val.get("analysis").and_then(|v| v.as_str()) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(analysis_str) {
-            if let Some(conf) = v.get("confidence") {
-                let conf_str = match conf {
-                    serde_json::Value::Number(n) => {
-                        if let Some(f) = n.as_f64() {
-                            if f <= 1.0 {
-                                format!("{:.0}", f * 100.0)
-                            } else {
-                                format!("{:.0}", f)
-                            }
-                        } else {
-                            n.to_string()
-                        }
+    if let Some(analysis_str) = analysis_val.get("analysis").and_then(|v| v.as_str())
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(analysis_str)
+        && let Some(conf) = v.get("confidence")
+    {
+        let conf_str = match conf {
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    if f <= 1.0 {
+                        format!("{:.0}", f * 100.0)
+                    } else {
+                        format!("{:.0}", f)
                     }
-                    serde_json::Value::String(s) => s.replace('%', "").trim().to_string(),
-                    other => other.to_string(),
-                };
-                if !conf_str.is_empty() && conf_str != "null" {
-                    return conf_str;
+                } else {
+                    n.to_string()
                 }
             }
+            serde_json::Value::String(s) => s.replace('%', "").trim().to_string(),
+            other => other.to_string(),
+        };
+        if !conf_str.is_empty() && conf_str != "null" {
+            return conf_str;
         }
     }
     "-".to_string()
@@ -761,8 +776,9 @@ fn extract_confidence_from_analysis(analysis_val: &serde_json::Value) -> String 
 fn parse_research_json(raw: &str) -> Option<Vec<Line<'static>>> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
     let obj = v.as_object()?;
-    
-    let regime_label = obj.get("regime_label")
+
+    let regime_label = obj
+        .get("regime_label")
         .or_else(|| obj.get("regime"))
         .and_then(|v| v.as_str())
         .unwrap_or("N/A")
@@ -831,22 +847,26 @@ fn parse_research_json(raw: &str) -> Option<Vec<Line<'static>>> {
         }
     }
 
-    let trade_hypothesis = obj.get("trade_hypothesis")
+    let trade_hypothesis = obj
+        .get("trade_hypothesis")
         .and_then(|v| v.as_str())
         .unwrap_or("N/A")
         .to_string();
 
-    let entry_condition = obj.get("entry_condition")
+    let entry_condition = obj
+        .get("entry_condition")
         .and_then(|v| v.as_str())
         .unwrap_or("N/A")
         .to_string();
 
-    let stop_loss_level = obj.get("stop_loss_level")
+    let stop_loss_level = obj
+        .get("stop_loss_level")
         .and_then(|v| v.as_str())
         .unwrap_or("N/A")
         .to_string();
 
-    let confidence = obj.get("confidence")
+    let confidence = obj
+        .get("confidence")
         .map(|v| match v {
             serde_json::Value::Number(n) => {
                 if let Some(f) = n.as_f64() {
@@ -867,27 +887,45 @@ fn parse_research_json(raw: &str) -> Option<Vec<Line<'static>>> {
     let mut lines = Vec::new();
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("  Regime:     ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Regime:     ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(regime_label, Style::default().fg(C_TEXT)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("  RSI:        ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  RSI:        ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(rsi_val, Style::default().fg(C_TEXT)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("  Hypothesis: ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Hypothesis: ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(trade_hypothesis, Style::default().fg(C_TEXT)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("  Entry:      ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Entry:      ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(entry_condition, Style::default().fg(C_TEXT)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("  Stop:       ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Stop:       ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(stop_loss_level, Style::default().fg(C_TEXT)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("  Confidence: ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Confidence: ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(format!("{}%", confidence), Style::default().fg(C_TEXT)),
     ]));
 
@@ -901,48 +939,55 @@ async fn fetch_history(tx: mpsc::UnboundedSender<AppMessage>) {
         .unwrap_or_default();
 
     let url = format!("{}/runs", BACKEND_URL);
-    match client.get(&url).send().await {
-        Ok(resp) => {
-            if let Ok(api_resp) = resp.json::<RunsApiResponse>().await {
-                let mut entries = Vec::new();
-                for doc in api_resp.runs {
-                    let symbol = doc.symbol.clone().unwrap_or_else(|| "Unknown".to_string());
-                    let verdict = doc.final_verdict.clone().unwrap_or_else(|| "-".to_string());
-                    let iterations = doc.total_iterations.map(|i| i.to_string()).unwrap_or_else(|| "1".to_string());
-                    
-                    let timestamp = doc.timestamp.clone().map(|ts| {
-                        if ts.len() >= 19 {
-                            ts[..19].replace('T', " ")
-                        } else {
-                            ts
-                        }
-                    }).unwrap_or_else(|| "-".to_string());
+    if let Ok(resp) = client.get(&url).send().await
+        && let Ok(api_resp) = resp.json::<RunsApiResponse>().await
+    {
+        let mut entries = Vec::new();
+        for doc in api_resp.runs {
+            let symbol = doc.symbol.clone().unwrap_or_else(|| "Unknown".to_string());
+            let verdict = doc.final_verdict.clone().unwrap_or_else(|| "-".to_string());
+            let iterations = doc
+                .total_iterations
+                .map(|i| i.to_string())
+                .unwrap_or_else(|| "1".to_string());
 
-                    let analysis_val = doc.research_analysis.as_ref().unwrap_or(&serde_json::Value::Null);
-                    let regime = if let Some(analysis_str) = analysis_val.get("analysis").and_then(|v| v.as_str()) {
-                        extract_regime(analysis_str)
+            let timestamp = doc
+                .timestamp
+                .clone()
+                .map(|ts| {
+                    if ts.len() >= 19 {
+                        ts[..19].replace('T', " ")
                     } else {
-                        "Unknown".to_string()
-                    };
+                        ts
+                    }
+                })
+                .unwrap_or_else(|| "-".to_string());
 
-                    let confidence = extract_confidence_from_analysis(analysis_val);
+            let analysis_val = doc
+                .research_analysis
+                .as_ref()
+                .unwrap_or(&serde_json::Value::Null);
+            let regime =
+                if let Some(analysis_str) = analysis_val.get("analysis").and_then(|v| v.as_str()) {
+                    extract_regime(analysis_str)
+                } else {
+                    "Unknown".to_string()
+                };
 
-                    entries.push(HistoryEntry {
-                        symbol,
-                        regime,
-                        verdict,
-                        confidence,
-                        iterations,
-                        timestamp,
-                    });
-                }
-                let _ = tx.send(AppMessage::HistoryResult(entries));
-            }
+            let confidence = extract_confidence_from_analysis(analysis_val);
+
+            entries.push(HistoryEntry {
+                symbol,
+                regime,
+                verdict,
+                confidence,
+                iterations,
+                timestamp,
+            });
         }
-        Err(_) => {}
+        let _ = tx.send(AppMessage::HistoryResult(entries));
     }
 }
-
 
 fn spinner_frame(instant: &Instant) -> &'static str {
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -959,7 +1004,8 @@ async fn check_health() -> bool {
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap_or_default();
-    client.get(format!("{}/health", BACKEND_URL))
+    client
+        .get(format!("{}/health", BACKEND_URL))
         .send()
         .await
         .map(|r| r.status().is_success())
@@ -1033,8 +1079,6 @@ async fn run_sse_pipeline(
     Ok(())
 }
 
-
-
 async fn run_http_pipeline(
     client: &reqwest::Client,
     symbol: &str,
@@ -1044,30 +1088,37 @@ async fn run_http_pipeline(
     let analyze_url = format!("{}/analyze/{}", BACKEND_URL, symbol);
     match client.get(&analyze_url).send().await {
         Err(e) => {
-            let _ = tx.send(AppMessage::PipelineError(format!("Research fetch failed: {}", e)));
-            return;
+            let _ = tx.send(AppMessage::PipelineError(format!(
+                "Research fetch failed: {}",
+                e
+            )));
         }
         Ok(resp) => match resp.json::<AnalyzeResponse>().await {
             Err(e) => {
-                let _ = tx.send(AppMessage::PipelineError(format!("Research parse failed: {}", e)));
-                return;
+                let _ = tx.send(AppMessage::PipelineError(format!(
+                    "Research parse failed: {}",
+                    e
+                )));
             }
             Ok(data) => {
                 let raw_analysis = data.ai_analysis.unwrap_or_default();
                 let _ = tx.send(AppMessage::ResearchResult(raw_analysis));
 
-
                 // Extract indicators using the typed LiveIndicators struct
                 let ind = data.live_indicators.as_ref();
                 let price = ind.and_then(|v| v.price());
-                let rsi   = ind.and_then(|v| v.rsi);
+                let rsi = ind.and_then(|v| v.rsi);
                 let macd_line = ind.and_then(|v| v.macd).unwrap_or(0.0);
-                let macd_sig  = ind.and_then(|v| v.macd_signal()).unwrap_or(0.0);
+                let macd_sig = ind.and_then(|v| v.macd_signal()).unwrap_or(0.0);
                 let ema20 = ind.and_then(|v| v.ema20).unwrap_or(0.0);
                 let ema50 = ind.and_then(|v| v.ema50).unwrap_or(0.0);
-                let atr   = ind.and_then(|v| v.atr).unwrap_or(0.0);
+                let atr = ind.and_then(|v| v.atr).unwrap_or(0.0);
 
-                let trend = if ema20 > ema50 { "Bullish (EMA20>EMA50)" } else { "Bearish (EMA20<EMA50)" };
+                let trend = if ema20 > ema50 {
+                    "Bullish (EMA20>EMA50)"
+                } else {
+                    "Bearish (EMA20<EMA50)"
+                };
                 let volume_trend = format!(
                     "Trend: {} | EMA20: {:.2} | EMA50: {:.2} | ATR: {:.4}",
                     trend, ema20, ema50, atr
@@ -1089,11 +1140,17 @@ async fn run_http_pipeline(
                     .await
                 {
                     Err(e) => {
-                        let _ = tx.send(AppMessage::PipelineError(format!("Critique fetch failed: {}", e)));
+                        let _ = tx.send(AppMessage::PipelineError(format!(
+                            "Critique fetch failed: {}",
+                            e
+                        )));
                     }
                     Ok(cr_resp) => match cr_resp.json::<CritiqueApiResponse>().await {
                         Err(e) => {
-                            let _ = tx.send(AppMessage::PipelineError(format!("Critique parse failed: {}", e)));
+                            let _ = tx.send(AppMessage::PipelineError(format!(
+                                "Critique parse failed: {}",
+                                e
+                            )));
                         }
                         Ok(cr_data) => {
                             // Strip markdown fences from generated code
@@ -1101,10 +1158,10 @@ async fn run_http_pipeline(
                                 let code = code_obj.clean_code();
                                 let _ = tx.send(AppMessage::CodeGenResult(code));
                             }
-                             if let Some(mut critique) = cr_data.critique {
-                                 critique.total_iterations = cr_data.total_iterations;
-                                 let _ = tx.send(AppMessage::CriticResult(critique));
-                             }
+                            if let Some(mut critique) = cr_data.critique {
+                                critique.total_iterations = cr_data.total_iterations;
+                                let _ = tx.send(AppMessage::CriticResult(critique));
+                            }
                         }
                     },
                 }
@@ -1161,7 +1218,10 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = Line::from(vec![
-        Span::styled("  ◈ ", Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  ◈ ",
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             "AGENTIC QUANT SANDBOX",
             Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
@@ -1169,7 +1229,12 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("  │  ", Style::default().fg(C_TEXT_MUTED)),
         Span::styled(&app.clock, Style::default().fg(C_TEXT_DIM)),
         Span::styled("  │  BACKEND: ", Style::default().fg(C_TEXT_MUTED)),
-        Span::styled(status_label, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            status_label,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     let header = Paragraph::new(title)
@@ -1190,7 +1255,9 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<Line> = vec![
         Line::from(Span::styled(
             "  NAV",
-            Style::default().fg(C_TEXT_MUTED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(C_TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         nav_item("[1] Dashboard", app.active_view == View::Dashboard),
@@ -1214,13 +1281,12 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         )),
     ];
 
-    let sidebar = Paragraph::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::RIGHT)
-                .border_style(Style::default().fg(C_BORDER))
-                .style(Style::default().bg(C_BG_PANEL)),
-        );
+    let sidebar = Paragraph::new(items).block(
+        Block::default()
+            .borders(Borders::RIGHT)
+            .border_style(Style::default().fg(C_BORDER))
+            .style(Style::default().bg(C_BG_PANEL)),
+    );
     f.render_widget(sidebar, area);
 }
 
@@ -1279,8 +1345,8 @@ fn render_dashboard(f: &mut Frame, app: &mut App, spinner_tick: &Instant, area: 
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(9),  // agent cards
-            Constraint::Min(6),     // bottom panels
+            Constraint::Length(9), // agent cards
+            Constraint::Min(6),    // bottom panels
         ])
         .split(area);
 
@@ -1301,10 +1367,7 @@ fn render_dashboard(f: &mut Frame, app: &mut App, spinner_tick: &Instant, area: 
     // Bottom panels
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(32),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(32)])
         .split(chunks[1]);
 
     render_feed_log(f, app, bottom[0]);
@@ -1321,9 +1384,7 @@ fn render_agent_card(f: &mut Frame, agent: &AgentStatus, spinner_tick: &Instant,
     let content = vec![
         Line::from(Span::styled(
             format!("  {}", agent.name),
-            Style::default()
-                .fg(C_PRIMARY)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -1351,14 +1412,13 @@ fn render_agent_card(f: &mut Frame, agent: &AgentStatus, spinner_tick: &Instant,
         AgentState::Idle => C_BORDER,
     };
 
-    let card = Paragraph::new(content)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color))
-                .border_type(BorderType::Rounded)
-                .style(Style::default().bg(C_BG_PANEL)),
-        );
+    let card = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(C_BG_PANEL)),
+    );
     f.render_widget(card, area);
 }
 
@@ -1379,18 +1439,17 @@ fn render_feed_log(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(Span::styled(
-                    "  ▸ RECENT ANALYSES",
-                    Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
-                ))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(C_BORDER))
-                .border_type(BorderType::Rounded)
-                .style(Style::default().bg(C_BG_PANEL)),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .title(Span::styled(
+                "  ▸ RECENT ANALYSES",
+                Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_BORDER))
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(C_BG_PANEL)),
+    );
     f.render_widget(list, area);
 }
 
@@ -1414,25 +1473,27 @@ fn render_system_status(f: &mut Frame, app: &App, area: Rect) {
         status_row("URL", "127.0.0.1:8000", C_TEXT_MUTED),
     ];
 
-    let panel = Paragraph::new(content)
-        .block(
-            Block::default()
-                .title(Span::styled(
-                    "  ▸ SYSTEM",
-                    Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
-                ))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(C_BORDER))
-                .border_type(BorderType::Rounded)
-                .style(Style::default().bg(C_BG_PANEL)),
-        );
+    let panel = Paragraph::new(content).block(
+        Block::default()
+            .title(Span::styled(
+                "  ▸ SYSTEM",
+                Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_BORDER))
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(C_BG_PANEL)),
+    );
     f.render_widget(panel, area);
 }
 
 fn status_row<'a>(key: &'a str, val: &'a str, val_color: Color) -> Line<'a> {
     Line::from(vec![
         Span::styled(format!("  {:<9}", key), Style::default().fg(C_TEXT_MUTED)),
-        Span::styled(val, Style::default().fg(val_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            val,
+            Style::default().fg(val_color).add_modifier(Modifier::BOLD),
+        ),
     ])
 }
 
@@ -1443,8 +1504,8 @@ fn render_analyze(f: &mut Frame, app: &mut App, spinner_tick: &Instant, area: Re
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(5),  // input bar
-            Constraint::Min(1),     // pipeline panels
+            Constraint::Length(5), // input bar
+            Constraint::Min(1),    // pipeline panels
         ])
         .split(area);
 
@@ -1453,7 +1514,10 @@ fn render_analyze(f: &mut Frame, app: &mut App, spinner_tick: &Instant, area: Re
 }
 
 fn render_ticker_input(f: &mut Frame, app: &App, area: Rect) {
-    let running = !matches!(app.loading_state, LoadingState::Idle | LoadingState::Complete | LoadingState::Error(_));
+    let running = !matches!(
+        app.loading_state,
+        LoadingState::Idle | LoadingState::Complete | LoadingState::Error(_)
+    );
     let placeholder = if app.ticker_input.is_empty() && !running {
         "BTC-USD  ETH-USD  AAPL  TSLA  NVDA …"
     } else {
@@ -1486,24 +1550,20 @@ fn render_ticker_input(f: &mut Frame, app: &App, area: Rect) {
 
     let row = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(30),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(30)])
         .split(area);
 
-    let input_widget = Paragraph::new(Line::from(input_display))
-        .block(
-            Block::default()
-                .title(Span::styled(
-                    "  ◈ TICKER SYMBOL",
-                    Style::default().fg(C_TEXT_DIM).add_modifier(Modifier::BOLD),
-                ))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(if running { C_WARNING } else { C_PRIMARY }))
-                .border_type(BorderType::Rounded)
-                .style(Style::default().bg(C_BG_PANEL)),
-        );
+    let input_widget = Paragraph::new(Line::from(input_display)).block(
+        Block::default()
+            .title(Span::styled(
+                "  ◈ TICKER SYMBOL",
+                Style::default().fg(C_TEXT_DIM).add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(if running { C_WARNING } else { C_PRIMARY }))
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(C_BG_PANEL)),
+    );
     f.render_widget(input_widget, row[0]);
 
     let btn_widget = Paragraph::new(Line::from(Span::styled(btn_text, btn_style)))
@@ -1573,7 +1633,10 @@ fn render_research_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area:
                     Style::default().fg(C_TEXT_MUTED),
                 )),
             ],
-            _ => vec![Line::from(Span::styled("  No data.", Style::default().fg(C_TEXT_MUTED)))],
+            _ => vec![Line::from(Span::styled(
+                "  No data.",
+                Style::default().fg(C_TEXT_MUTED),
+            ))],
         }
     } else {
         if let Some(lines) = parse_research_json(&app.research_output) {
@@ -1591,7 +1654,6 @@ fn render_research_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area:
         }
     };
 
-
     let panel = Paragraph::new(content)
         .block(
             Block::default()
@@ -1600,7 +1662,12 @@ fn render_research_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area:
                         "  ◈ RESEARCH AGENT  ",
                         Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(badge, Style::default().fg(agent.state_color()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        badge,
+                        Style::default()
+                            .fg(agent.state_color())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
@@ -1632,7 +1699,10 @@ fn render_codegen_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area: 
             AgentState::Running => vec![
                 Line::from(""),
                 Line::from(Span::styled(
-                    format!("  {} Generating strategy code…", spinner_frame(spinner_tick)),
+                    format!(
+                        "  {} Generating strategy code…",
+                        spinner_frame(spinner_tick)
+                    ),
                     Style::default().fg(C_WARNING),
                 )),
             ],
@@ -1648,8 +1718,14 @@ fn render_codegen_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area: 
         app.codegen_output
             .lines()
             .map(|l| {
-                let style = if l.starts_with("def ") || l.starts_with("class ") || l.starts_with("import ") || l.starts_with("from ") {
-                    Style::default().fg(C_SECONDARY).add_modifier(Modifier::BOLD)
+                let style = if l.starts_with("def ")
+                    || l.starts_with("class ")
+                    || l.starts_with("import ")
+                    || l.starts_with("from ")
+                {
+                    Style::default()
+                        .fg(C_SECONDARY)
+                        .add_modifier(Modifier::BOLD)
                 } else if l.trim().starts_with('#') {
                     Style::default().fg(C_TEXT_DIM)
                 } else {
@@ -1666,9 +1742,16 @@ fn render_codegen_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area: 
                 .title(Line::from(vec![
                     Span::styled(
                         "  ◈ CODEGEN AGENT  ",
-                        Style::default().fg(C_SECONDARY).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(C_SECONDARY)
+                            .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(badge, Style::default().fg(agent.state_color()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        badge,
+                        Style::default()
+                            .fg(agent.state_color())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
@@ -1782,9 +1865,16 @@ fn render_critic_panel(f: &mut Frame, app: &App, spinner_tick: &Instant, area: R
                 .title(Line::from(vec![
                     Span::styled(
                         "  ◈ CRITIC AGENT  ",
-                        Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(border_color)
+                            .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(badge, Style::default().fg(agent.state_color()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        badge,
+                        Style::default()
+                            .fg(agent.state_color())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color))
@@ -1820,7 +1910,8 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
             };
 
             Row::new(vec![
-                Cell::from(entry.symbol.clone()).style(Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
+                Cell::from(entry.symbol.clone())
+                    .style(Style::default().fg(C_PRIMARY).add_modifier(Modifier::BOLD)),
                 Cell::from(entry.regime.clone()).style(Style::default().fg(C_TEXT_DIM)),
                 Cell::from(verdict_icon).style(verdict_style),
                 Cell::from(entry.confidence.clone()).style(Style::default().fg(C_TEXT_DIM)),
@@ -1838,30 +1929,43 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
         ""
     };
 
-    let selected_style = Style::default().bg(C_HIGHLIGHT).fg(C_PRIMARY).add_modifier(Modifier::BOLD);
+    let selected_style = Style::default()
+        .bg(C_HIGHLIGHT)
+        .fg(C_PRIMARY)
+        .add_modifier(Modifier::BOLD);
 
-    let header_cells = ["SYMBOL", "REGIME", "VERDICT", "CONFIDENCE", "ITERATIONS", "TIMESTAMP"]
-        .iter()
-        .map(|h| {
-            Cell::from(*h).style(
-                Style::default()
-                    .fg(C_PRIMARY)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            )
-        });
+    let header_cells = [
+        "SYMBOL",
+        "REGIME",
+        "VERDICT",
+        "CONFIDENCE",
+        "ITERATIONS",
+        "TIMESTAMP",
+    ]
+    .iter()
+    .map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(C_PRIMARY)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )
+    });
 
     let header = Row::new(header_cells)
         .height(1)
         .style(Style::default().bg(C_BG_HEADER));
 
-    let table = Table::new(rows, [
-        Constraint::Length(12),
-        Constraint::Length(14),
-        Constraint::Length(10),
-        Constraint::Length(12),
-        Constraint::Length(12),
-        Constraint::Min(20),
-    ])
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(12),
+            Constraint::Length(14),
+            Constraint::Length(10),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Min(20),
+        ],
+    )
     .header(header)
     .block(
         Block::default()
@@ -1915,7 +2019,6 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT HANDLING
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1923,11 +2026,12 @@ fn render_history(f: &mut Frame, app: &mut App, area: Rect) {
 fn handle_key_event(app: &mut App, key: event::KeyEvent) {
     // Global shortcuts
     match key.code {
-        KeyCode::Char('q') | KeyCode::Char('Q') => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) || app.active_view != View::Analyze {
-                app.should_quit = true;
-                return;
-            }
+        KeyCode::Char('q') | KeyCode::Char('Q')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || app.active_view != View::Analyze =>
+        {
+            app.should_quit = true;
+            return;
         }
         KeyCode::Char('1') => {
             app.switch_view(View::Dashboard);
@@ -1941,17 +2045,17 @@ fn handle_key_event(app: &mut App, key: event::KeyEvent) {
             app.switch_view(View::History);
             return;
         }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            if app.active_view != View::Analyze || app.ticker_input.is_empty() {
-                let tx = app.msg_tx.clone();
-                tokio::spawn(async move {
-                    let ok = check_health().await;
-                    let _ = tx.send(AppMessage::HealthCheckResult(ok));
-                });
-                let tx2 = app.msg_tx.clone();
-                tokio::spawn(fetch_history(tx2));
-                return;
-            }
+        KeyCode::Char('r') | KeyCode::Char('R')
+            if app.active_view != View::Analyze || app.ticker_input.is_empty() =>
+        {
+            let tx = app.msg_tx.clone();
+            tokio::spawn(async move {
+                let ok = check_health().await;
+                let _ = tx.send(AppMessage::HealthCheckResult(ok));
+            });
+            let tx2 = app.msg_tx.clone();
+            tokio::spawn(fetch_history(tx2));
+            return;
         }
 
         _ => {}
@@ -1967,11 +2071,11 @@ fn handle_key_event(app: &mut App, key: event::KeyEvent) {
 
 fn handle_analyze_keys(app: &mut App, key: event::KeyEvent) {
     match key.code {
-        KeyCode::Char(c) => {
+        KeyCode::Char(c)
             if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT) {
-                app.input_push(c);
-            }
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            app.input_push(c);
         }
         KeyCode::Backspace => app.input_backspace(),
         KeyCode::Delete => app.input_delete(),
@@ -2053,15 +2157,11 @@ async fn main() -> Result<()> {
     let tick_rate = Duration::from_millis(TICK_RATE_MS);
     let mut last_tick = Instant::now();
 
-
     // Main render loop
     loop {
         // Drain all pending async messages
-        loop {
-            match msg_rx.try_recv() {
-                Ok(msg) => app.apply_message(msg),
-                Err(_) => break,
-            }
+        while let Ok(msg) = msg_rx.try_recv() {
+            app.apply_message(msg);
         }
 
         // Draw
@@ -2072,14 +2172,13 @@ async fn main() -> Result<()> {
             .checked_sub(last_tick.elapsed())
             .unwrap_or(Duration::ZERO);
 
-        if event::poll(timeout).context("event poll failed")? {
-            if let Event::Key(key) = event::read().context("event read failed")? {
-                // Only handle actual key presses — ignore Release and Repeat
-                // to prevent duplicate processing on Windows terminals.
-                if key.kind == KeyEventKind::Press {
-                    handle_key_event(&mut app, key);
-                }
-            }
+        if event::poll(timeout).context("event poll failed")?
+            && let Event::Key(key) = event::read().context("event read failed")?
+            && key.kind == KeyEventKind::Press
+        {
+            // Only handle actual key presses — ignore Release and Repeat
+            // to prevent duplicate processing on Windows terminals.
+            handle_key_event(&mut app, key);
         }
 
         if last_tick.elapsed() >= tick_rate {

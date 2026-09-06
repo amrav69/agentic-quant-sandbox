@@ -11,6 +11,8 @@ Fast, panic-free Rust technical indicator library powering the Agentic Quant San
 
 ## Running
 
+All commands run from the repo root (single Cargo workspace).
+
 ```bash
 # Build everything
 cargo build --workspace

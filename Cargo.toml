@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "rust/quant-core",
     "rust/feed-ingestor",
+    "rust/aqs-tui",
 ]

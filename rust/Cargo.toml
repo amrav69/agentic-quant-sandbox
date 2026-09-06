@@ -1,7 +1,0 @@
-[workspace]
-members = [
-    "quant-core",
-    "feed-ingestor",
-    "aqs-tui"
-]
-resolver = "2"

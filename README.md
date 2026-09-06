@@ -201,7 +201,6 @@ agentic-quant-sandbox/
 │   └── risk/
 │       └── engine.py           # Position sizing, VaR, Kelly, trade validation
 ├── rust/
-│   ├── Cargo.toml              # Workspace definition
 │   ├── aqs-tui/
 │   │   └── src/main.rs         # Ratatui terminal UI (~1900 lines)
 │   ├── quant-core/
@@ -230,7 +229,7 @@ agentic-quant-sandbox/
 ├── requirements.txt            # vectorbt==1.0.0, plotly==6.7.0 (pinned: plotly 7 breaks vectorbt import)
 ├── requirements-dev.txt
 ├── pyproject.toml
-├── Cargo.toml
+├── Cargo.toml                  # Cargo workspace (quant-core, feed-ingestor, aqs-tui)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── LICENSE
@@ -257,8 +256,7 @@ agentic-quant-sandbox/
 ### Rust
 
 ```bash
-# Unit and integration tests for all crates
-cd rust
+# Unit and integration tests for all crates (from repo root — single workspace)
 cargo test --workspace
 
 # Criterion benchmarks (quant-core)
